@@ -219,10 +219,29 @@ def normalize_image_format(image_format):
 		text = "jpeg"
 	return text
 
+def ensure_output_dirs(output_root):
+	train_dir = output_root / "Map_Training_Set"
+	valid_dir = output_root / "Map_Validation_Set"
+	test_dir = output_root / "Map_Test_Set"
+
+	for directory in (train_dir, valid_dir, test_dir):
+		directory.mkdir(parents=True, exist_ok=True)
+
+	return train_dir, valid_dir, test_dir
+
 def run():
 	setup_logging()
 	args = parse_args()
 	validate_args(args)
+	
+	zoom_levels = parse_zoom_levels(args.zoom_levels)
+	map_type = str(args.map_type).strip().lower()
+
+	output_root = Path(args.output_root)
+	output_root.mkdir(parents=True, exist_ok=True)
+	train_dir, valid_dir, test_dir = ensure_output_dirs(output_root)
+
+
 
 if __name__ == "__main__":
 	run()
