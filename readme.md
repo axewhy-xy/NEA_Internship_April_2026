@@ -5,15 +5,17 @@ Project Description: This study aims to identify HDB structures and estimate the
 
 ## Planned Tasked/TODO:
 1. [X] - Set up environment for Google Earth Engine API for satellite imagery
-2. [X] - Write an algorithm using the GEE API to retrieve satellite imagery.
+2. [X] - Write an algorithm/script using the GEE API to retrieve satellite imagery.
 3. [X] - Set up the environment for the Google Maps Street View API for close-up imagery/street view images of HDB buildings.
-4. [X] - Write an algorithm using the Google Maps Street View API to retrieve street views of HDB buildings.
-5. [ ] - Research and consider which causal machine learning model that can support object detection to train the dataset with 
+4. [X] - Write an algorithm/script using the Google Maps Street View API to retrieve street views of HDB buildings.
+5. [ ] - Set up enviroment for Google Map Tile API to obtain a Satellite Tile of the chosen location
+6. [ ] - Write an alogrithm/script to extract Satellite Tile and retrieve the images of the chosen location.
+7. [ ] - Research and consider which causal machine learning model that can support object detection to train the dataset with 
          (preferably using transfer learning. For instance, freezing hidden layers and only training the last few layers + output layer).
-6. [ ] - Research and download the weights used to train the selected causal machine learning model in order to utilise transfer learning methodology. 
-7. [ ] - Research and consider image labelling tools to be used for the collected dataset to feed into the chosen causal machine learning model.
-8. [ ] - Label HDB features from the collected dataset. 
-9. [ ] - Train the selected model with the collected dataset and tune hyperparameters to optimise the prediction accuracy.
+8. [ ] - Research and download the weights used to train the selected causal machine learning model in order to utilise transfer learning methodology. 
+9. [ ] - Research and consider image labelling tools to be used for the collected dataset to feed into the chosen causal machine learning model.
+10. [ ] - Label HDB features from the collected dataset. 
+11. [ ] - Train the selected model with the collected dataset and tune hyperparameters to optimise the prediction accuracy.
 
 ## Problems Encountered: (Title: (date) [Complexity] [Status])
 1. Low satellite imagery resolution: (2026-04-13) [Moderate] [Unresolved]
