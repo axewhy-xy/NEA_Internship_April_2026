@@ -211,6 +211,16 @@ def parse_zoom_levels(zoom_levels_text):
 	# Preserve insertion order while deduplicating.
 	return list(dict.fromkeys(levels))	
 
+def _row_value(row, *keys):
+	for key in keys:
+		value = row.get(key)
+		if value is None:
+			continue
+		text = str(value).strip()
+		if text:
+			return text
+	return None
+
 def normalize_image_format(image_format):
 	text = str(image_format or "").strip().lower()
 	if text.startswith("image/"):
@@ -327,12 +337,126 @@ def geocode_postal_sg(
 		return None, None
 	return lat, lon
 
+def load_samples(
+	csv_path,
+	session,
+	timeout,
+	max_retries,
+	backoff_seconds,
+	geocode_delay_seconds,
+):
+	rows = []
+	postal_cache = {}
+
+	with open(csv_path, newline="", encoding="utf-8") as file_obj:
+		reader = csv.DictReader(file_obj)
+
+		for line_no, row in enumerate(reader, start=2):
+			sample_id = _row_value(row, "id", "ID") or f"row_{line_no}"
+			label = _row_value(row, "label", "Label") or ""
+
+			lat_raw = _row_value(row, "lat", "latitude", "LAT", "Latitude")
+			lon_raw = _row_value(row, "lon", "lng", "longitude", "LON", "Longitude")
+			postal_code = _row_value(
+				row,
+				"postal_code",
+				"postal",
+				"postcode",
+				"postal code",
+				"POSTAL",
+			)
+
+			lat = None
+			lon = None
+
+			if lat_raw is not None and lon_raw is not None:
+				try:
+					lat = float(lat_raw)
+					lon = float(lon_raw)
+				except ValueError:
+					logging.warning(
+						"Skipping line %s (%s): invalid lat/lon values.",
+						line_no,
+						sample_id,
+					)
+					continue
+			elif postal_code:
+				if postal_code not in postal_cache:
+					lat_lon = geocode_postal_sg(
+						session,
+						postal_code,
+						timeout=timeout,
+						max_retries=max_retries,
+						backoff_seconds=backoff_seconds,
+					)
+					postal_cache[postal_code] = lat_lon
+					time.sleep(geocode_delay_seconds)
+
+				lat, lon = postal_cache[postal_code]
+				if lat is None or lon is None:
+					logging.warning(
+						"Skipping line %s (%s): could not geocode postal code %s.",
+						line_no,
+						sample_id,
+						postal_code,
+					)
+					continue
+			else:
+				logging.warning(
+					"Skipping line %s (%s): missing both lat/lon and postal code.",
+					line_no,
+					sample_id,
+				)
+				continue
+
+			if not (-85.051129 <= lat <= 85.051129):
+				logging.warning(
+					"Skipping line %s (%s): latitude out of Web Mercator range.",
+					line_no,
+					sample_id,
+				)
+				continue
+			if not (-180 <= lon <= 180):
+				logging.warning(
+					"Skipping line %s (%s): longitude out of range.",
+					line_no,
+					sample_id,
+				)
+				continue
+
+			rows.append(
+				{
+					"id": sample_id,
+					"lat": lat,
+					"lon": lon,
+					"label": label,
+					"postal_code": postal_code or "",
+				}
+			)
+
+	if not rows:
+		raise ValueError(f"No valid samples loaded from {csv_path}.")
+	return rows
+
+def split_rows(rows, seed, train_ratio, valid_ratio):
+	rng = random.Random(seed)
+	rows_copy = rows[:]
+	rng.shuffle(rows_copy)
+
+	count = len(rows_copy)
+	n_train = int(count * train_ratio)
+	n_valid = int(count * valid_ratio)
+
+	train = rows_copy[:n_train]
+	valid = rows_copy[n_train : n_train + n_valid]
+	test = rows_copy[n_train + n_valid :]
+	return train, valid, test
 
 def run():
 	setup_logging()
 	args = parse_args()
 	validate_args(args)
-	
+
 	zoom_levels = parse_zoom_levels(args.zoom_levels)
 	map_type = str(args.map_type).strip().lower()
 
@@ -340,6 +464,42 @@ def run():
 	output_root.mkdir(parents=True, exist_ok=True)
 	train_dir, valid_dir, test_dir = ensure_output_dirs(output_root)
 
+	combined_metadata_path = output_root / args.metadata_csv
+	split_metadata_paths = {
+		"train": output_root / "map_metadata_train.csv",
+		"valid": output_root / "map_metadata_valid.csv",
+		"test": output_root / "map_metadata_test.csv",
+	}
+
+	logging.info("Loading samples from %s", args.input_csv)
+	with requests.Session() as session:
+		session.headers.update({"User-Agent": "NEA-MapTileExtractor/1.0"})
+
+		samples = load_samples(
+			args.input_csv,
+			session,
+			timeout=args.timeout_seconds,
+			max_retries=args.max_retries,
+			backoff_seconds=args.retry_backoff_seconds,
+			geocode_delay_seconds=args.geocode_delay_seconds,
+		)
+
+		train_rows, valid_rows, test_rows = split_rows(
+			samples,
+			seed=args.seed,
+			train_ratio=args.train_ratio,
+			valid_ratio=args.valid_ratio,
+		)
+
+		logging.info(
+			"Loaded %s samples | train=%s valid=%s test=%s | map_type=%s zoom_levels=%s",
+			len(samples),
+			len(train_rows),
+			len(valid_rows),
+			len(test_rows),
+			map_type,
+			zoom_levels,
+		)
 
 
 if __name__ == "__main__":
