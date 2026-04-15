@@ -1,2 +1,0 @@
-id,lat,lon,postal_code,label,split,path,status,error,collection_id,start_date,end_date,max_cloud,scale_m,patch_size_m,crs
-2,1.43304831,103.8361508,,Residential,train,Dataset\Training_Set\2_train.tif,OK,,COPERNICUS/S2_SR_HARMONIZED,2024-01-01,2024-12-31,20,10,320,EPSG:4326

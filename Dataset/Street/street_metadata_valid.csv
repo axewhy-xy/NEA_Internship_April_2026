@@ -1,0 +1,13 @@
+id,lat,lon,postal_code,label,split,heading,pitch,fov,size,pano_id,capture_date,status,path,error
+3,1.33570859607444,103.692384325863,630991,Others,valid,0,0,90,640x640,jwC1FnVqoaQfItu-iUConw,2024-07,OK,Dataset\Street\Street_Validation_Set\3_valid_h0_p0_f90.jpg,
+3,1.33570859607444,103.692384325863,630991,Others,valid,90,0,90,640x640,jwC1FnVqoaQfItu-iUConw,2024-07,OK,Dataset\Street\Street_Validation_Set\3_valid_h90_p0_f90.jpg,
+3,1.33570859607444,103.692384325863,630991,Others,valid,180,0,90,640x640,jwC1FnVqoaQfItu-iUConw,2024-07,OK,Dataset\Street\Street_Validation_Set\3_valid_h180_p0_f90.jpg,
+3,1.33570859607444,103.692384325863,630991,Others,valid,270,0,90,640x640,jwC1FnVqoaQfItu-iUConw,2024-07,OK,Dataset\Street\Street_Validation_Set\3_valid_h270_p0_f90.jpg,
+17,1.34307733543561,103.692906024314,640837,Residential,valid,0,0,90,640x640,R0xxE1NNCcpKN9rzer5xSw,2022-05,OK,Dataset\Street\Street_Validation_Set\17_valid_h0_p0_f90.jpg,
+17,1.34307733543561,103.692906024314,640837,Residential,valid,90,0,90,640x640,R0xxE1NNCcpKN9rzer5xSw,2022-05,OK,Dataset\Street\Street_Validation_Set\17_valid_h90_p0_f90.jpg,
+17,1.34307733543561,103.692906024314,640837,Residential,valid,180,0,90,640x640,R0xxE1NNCcpKN9rzer5xSw,2022-05,OK,Dataset\Street\Street_Validation_Set\17_valid_h180_p0_f90.jpg,
+17,1.34307733543561,103.692906024314,640837,Residential,valid,270,0,90,640x640,R0xxE1NNCcpKN9rzer5xSw,2022-05,OK,Dataset\Street\Street_Validation_Set\17_valid_h270_p0_f90.jpg,
+8,1.34744674941805,103.692827949719,640852,Residential,valid,0,0,90,640x640,MeBTeuxdi-xmRZkJ6LVqcQ,2024-04,OK,Dataset\Street\Street_Validation_Set\8_valid_h0_p0_f90.jpg,
+8,1.34744674941805,103.692827949719,640852,Residential,valid,90,0,90,640x640,MeBTeuxdi-xmRZkJ6LVqcQ,2024-04,OK,Dataset\Street\Street_Validation_Set\8_valid_h90_p0_f90.jpg,
+8,1.34744674941805,103.692827949719,640852,Residential,valid,180,0,90,640x640,MeBTeuxdi-xmRZkJ6LVqcQ,2024-04,OK,Dataset\Street\Street_Validation_Set\8_valid_h180_p0_f90.jpg,
+8,1.34744674941805,103.692827949719,640852,Residential,valid,270,0,90,640x640,MeBTeuxdi-xmRZkJ6LVqcQ,2024-04,OK,Dataset\Street\Street_Validation_Set\8_valid_h270_p0_f90.jpg,

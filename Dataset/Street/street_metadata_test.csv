@@ -1,0 +1,10 @@
+id,lat,lon,postal_code,label,split,heading,pitch,fov,size,pano_id,capture_date,status,path,error
+9,1.33604657171774,103.692759654591,630992,Others,test,,0,90,640x640,,,ZERO_RESULTS,,
+1,1.3465916671122,103.692474184137,640851,Residential,test,0,0,90,640x640,s-msEcPNxioW83mPBWAXDg,2024-04,OK,Dataset\Street\Street_Test_Set\1_test_h0_p0_f90.jpg,
+1,1.3465916671122,103.692474184137,640851,Residential,test,90,0,90,640x640,s-msEcPNxioW83mPBWAXDg,2024-04,OK,Dataset\Street\Street_Test_Set\1_test_h90_p0_f90.jpg,
+1,1.3465916671122,103.692474184137,640851,Residential,test,180,0,90,640x640,s-msEcPNxioW83mPBWAXDg,2024-04,OK,Dataset\Street\Street_Test_Set\1_test_h180_p0_f90.jpg,
+1,1.3465916671122,103.692474184137,640851,Residential,test,270,0,90,640x640,s-msEcPNxioW83mPBWAXDg,2024-04,OK,Dataset\Street\Street_Test_Set\1_test_h270_p0_f90.jpg,
+4,1.34493825499181,103.692382237035,640844,Residential,test,0,0,90,640x640,0epzcKx2NcYqINJiova7qg,2024-04,OK,Dataset\Street\Street_Test_Set\4_test_h0_p0_f90.jpg,
+4,1.34493825499181,103.692382237035,640844,Residential,test,90,0,90,640x640,0epzcKx2NcYqINJiova7qg,2024-04,OK,Dataset\Street\Street_Test_Set\4_test_h90_p0_f90.jpg,
+4,1.34493825499181,103.692382237035,640844,Residential,test,180,0,90,640x640,0epzcKx2NcYqINJiova7qg,2024-04,OK,Dataset\Street\Street_Test_Set\4_test_h180_p0_f90.jpg,
+4,1.34493825499181,103.692382237035,640844,Residential,test,270,0,90,640x640,0epzcKx2NcYqINJiova7qg,2024-04,OK,Dataset\Street\Street_Test_Set\4_test_h270_p0_f90.jpg,

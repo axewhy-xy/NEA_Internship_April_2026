@@ -1,0 +1,4 @@
+id,lat,lon,postal_code,label,split,path,status,error,collection_id,start_date,end_date,max_cloud,scale_m,patch_size_m,crs
+3,1.33570859607444,103.692384325863,630991,Others,valid,Dataset\Satellite\Satellite_Validation_Set\3_valid.tif,OK,,COPERNICUS/S2_SR_HARMONIZED,2024-01-01,2024-12-31,20,10,320,EPSG:4326
+17,1.34307733543561,103.692906024314,640837,Residential,valid,Dataset\Satellite\Satellite_Validation_Set\17_valid.tif,OK,,COPERNICUS/S2_SR_HARMONIZED,2024-01-01,2024-12-31,20,10,320,EPSG:4326
+8,1.34744674941805,103.692827949719,640852,Residential,valid,Dataset\Satellite\Satellite_Validation_Set\8_valid.tif,OK,,COPERNICUS/S2_SR_HARMONIZED,2024-01-01,2024-12-31,20,10,320,EPSG:4326
