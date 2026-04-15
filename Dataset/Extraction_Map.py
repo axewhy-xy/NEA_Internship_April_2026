@@ -609,6 +609,128 @@ class MapTilesClient:
 			f"Tile download failed after session refresh: z={zoom}, x={tile_x}, y={tile_y}."
 		)
 
+def lat_lon_to_tile_xy(lat, lon, zoom):
+	lat_rad = math.radians(lat)
+	n = 2 ** zoom
+
+	x_float = (lon + 180.0) / 360.0 * n
+	y_float = (
+		(1.0 - math.log(math.tan(lat_rad) + (1.0 / math.cos(lat_rad))) / math.pi) / 2.0
+	) * n
+
+	tile_x = int(x_float)
+	tile_y = int(y_float)
+
+	tile_x = min(max(tile_x, 0), n - 1)
+	tile_y = min(max(tile_y, 0), n - 1)
+	return tile_x, tile_y
+
+def sanitize_filename(value):
+	return re.sub(r"[^A-Za-z0-9._-]", "_", str(value))
+
+def write_metadata_row(writer, row):
+	writer.writerow([row.get(col, "") for col in METADATA_COLUMNS])
+
+def export_split(
+	rows,
+	split_dir,
+	split_name,
+	*,
+	map_type,
+	zoom_levels,
+	tile_client,
+	min_delay_seconds,
+	metadata_only,
+	skip_existing,
+	combined_writer,
+	split_writer,
+):
+	counters = {
+		"samples": len(rows),
+		"tile_targets": len(rows) * len(zoom_levels),
+		"tile_ok": 0,
+		"tile_failed": 0,
+		"tile_skipped": 0,
+	}
+
+	for row in rows:
+		sample_id = row["id"]
+		lat = row["lat"]
+		lon = row["lon"]
+		label = row["label"]
+		postal_code = row.get("postal_code", "")
+		safe_id = sanitize_filename(sample_id)
+
+		for zoom in zoom_levels:
+			tile_x, tile_y = lat_lon_to_tile_xy(lat, lon, zoom)
+			extension = tile_client.file_extension()
+			file_name = f"{safe_id}_{split_name}_z{zoom}_x{tile_x}_y{tile_y}.{extension}"
+			out_path = split_dir / file_name
+
+			row_data = {
+				"id": sample_id,
+				"lat": lat,
+				"lon": lon,
+				"postal_code": postal_code,
+				"label": label,
+				"split": split_name,
+				"map_type": map_type,
+				"zoom": zoom,
+				"tile_x": tile_x,
+				"tile_y": tile_y,
+				"tile_width": tile_client.tile_width,
+				"tile_height": tile_client.tile_height,
+				"image_format": tile_client.image_format,
+				"session_id": tile_client.tiles_session_id,
+				"status": "",
+				"path": str(out_path),
+				"error": "",
+			}
+
+			if metadata_only:
+				row_data["status"] = "OK_METADATA_ONLY"
+				write_metadata_row(combined_writer, row_data)
+				write_metadata_row(split_writer, row_data)
+				time.sleep(min_delay_seconds)
+				continue
+
+			if skip_existing and out_path.exists():
+				counters["tile_skipped"] += 1
+				row_data["status"] = "SKIPPED_EXISTS"
+				write_metadata_row(combined_writer, row_data)
+				write_metadata_row(split_writer, row_data)
+				time.sleep(min_delay_seconds)
+				continue
+
+			try:
+				tile_client.download_tile(zoom, tile_x, tile_y, out_path)
+				counters["tile_ok"] += 1
+				row_data["tile_width"] = tile_client.tile_width
+				row_data["tile_height"] = tile_client.tile_height
+				row_data["image_format"] = tile_client.image_format
+				row_data["session_id"] = tile_client.tiles_session_id
+				row_data["status"] = "OK"
+			except Exception as exc:
+				counters["tile_failed"] += 1
+				row_data["status"] = "DOWNLOAD_FAILED"
+				row_data["error"] = str(exc)
+				logging.warning(
+					"%s | split=%s zoom=%s tile=%s,%s failed: %s",
+					sample_id,
+					split_name,
+					zoom,
+					tile_x,
+					tile_y,
+					exc,
+				)
+
+			write_metadata_row(combined_writer, row_data)
+			write_metadata_row(split_writer, row_data)
+			time.sleep(min_delay_seconds)
+
+	return counters
+
+
 def run():
 	setup_logging()
 	args = parse_args()
