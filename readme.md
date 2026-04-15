@@ -6,7 +6,7 @@ Project Description: This study aims to identify HDB structures and estimate the
 ## Planned Tasked/TODO:
 1. [X] - Set up environment for Google Earth Engine API for satellite imagery
 2. [X] - Write an algorithm using the GEE API to retrieve satellite imagery.
-3. [ ] - Set up the environment for the Google Maps Street View API for close-up imagery/street view images of HDB buildings.
+3. [X] - Set up the environment for the Google Maps Street View API for close-up imagery/street view images of HDB buildings.
 4. [X] - Write an algorithm using the Google Maps Street View API to retrieve street views of HDB buildings.
 5. [ ] - Research and consider which causal machine learning model that can support object detection to train the dataset with 
          (preferably using transfer learning. For instance, freezing hidden layers and only training the last few layers + output layer).
@@ -21,7 +21,7 @@ While using Google Earth Engine API (GEE), one main problem encountered was the 
 
 ## Mitigation/Solution:
 1. Low satellite imagery resolution: (2026-04-13)
-There are 2 possible solutions/mitigations that can solve this issue. The first solution would be to use a better resolution dataset, specifically dataset fom NICFI, as it provides a 4.77m resolution which could potentially solve the low satellite image resolution. The second solution could be falling back to the old-school method of screenshotting individual images using Google Earth, which would take a long period of time for collecting a vast amount of satellite imagery. However, it is a well-proven method for obtaining a clear, high-resolution image which would be ideal for labelling the collected satellite image of the HDB buildings.
+There are 3 possible solutions/mitigations that can solve this issue. The first solution would be to use a better resolution dataset, specifically a dataset from NICFI, as it provides a 4.77 m resolution which could potentially solve the low satellite image resolution. The second solution could be falling back to the old-school method of screenshotting individual images using Google Earth, which would take a long period of time for collecting a vast amount of satellite imagery. However, it is a well-proven method for obtaining a clear, high-resolution image which would be ideal for labelling the collected satellite image of the HDB buildings. Alternatively, instead of using satellite imagery, using a photorealistic 3D Tiles could potentially work, bringing the best of both worlds with few compromises to the resolution. One API that can be considered will be using the Map Tile API from the Google Maps Platform which supports photorealistic 3D Tiles for next generation visualization use cases.
 
 ## Problem Resolution:
 1. Low satellite imagery resolution:
