@@ -851,6 +851,18 @@ def run():
 					stats["tile_skipped"],
 				)
 
+	logging.info("All splits complete.")
+	logging.info(
+		"TOTAL | samples=%s tile_targets=%s tile_ok=%s tile_failed=%s tile_skipped=%s",
+		total["samples"],
+		total["tile_targets"],
+		total["tile_ok"],
+		total["tile_failed"],
+		total["tile_skipped"],
+	)
+	logging.info("Combined metadata: %s", combined_metadata_path)
+	logging.info("Per-split metadata: %s", split_metadata_paths)
+
 
 if __name__ == "__main__":
 	run()
