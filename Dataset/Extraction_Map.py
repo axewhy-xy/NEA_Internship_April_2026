@@ -452,6 +452,163 @@ def split_rows(rows, seed, train_ratio, valid_ratio):
 	test = rows_copy[n_train + n_valid :]
 	return train, valid, test
 
+def parse_iso_datetime(text):
+	if not text:
+		return None
+	raw = str(text).strip()
+	if raw.endswith("Z"):
+		raw = raw[:-1] + "+00:00"
+	try:
+		dt_obj = datetime.datetime.fromisoformat(raw)
+	except ValueError:
+		return None
+	if dt_obj.tzinfo is None:
+		dt_obj = dt_obj.replace(tzinfo=datetime.timezone.utc)
+	return dt_obj
+
+def image_format_to_extension(image_format):
+	fmt = normalize_image_format(image_format)
+	if fmt == "jpeg":
+		return "jpg"
+	if fmt in {"png", "webp"}:
+		return fmt
+	return "bin"
+
+def safe_write_bytes(out_path, data):
+	temp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+	temp_path.write_bytes(data)
+	temp_path.replace(out_path)
+	
+def extract_status_code(exc):
+	cause = exc.__cause__
+	if isinstance(cause, requests.HTTPError) and cause.response is not None:
+		return cause.response.status_code
+	return None
+
+class MapTilesClient:
+	def __init__(
+		self,
+		session,
+		*,
+		api_key,
+		map_type,
+		language,
+		region,
+		preferred_image_format,
+		timeout,
+		max_retries,
+		backoff_seconds,
+		refresh_seconds,
+	):
+		self.http_session = session
+		self.api_key = api_key
+		self.map_type = map_type
+		self.language = language
+		self.region = region
+		self.preferred_image_format = normalize_image_format(preferred_image_format)
+		self.timeout = timeout
+		self.max_retries = max_retries
+		self.backoff_seconds = backoff_seconds
+		self.refresh_seconds = refresh_seconds
+
+		self.tiles_session_id = None
+		self.expiry = None
+		self.tile_width = ""
+		self.tile_height = ""
+		self.image_format = self.preferred_image_format
+
+	def _needs_refresh(self):
+		if not self.tiles_session_id:
+			return True
+		if self.expiry is None:
+			return False
+
+		now = datetime.datetime.now(datetime.timezone.utc)
+		refresh_at = now + datetime.timedelta(seconds=self.refresh_seconds)
+		return refresh_at >= self.expiry
+
+	def create_session(self, force=False):
+		if not force and not self._needs_refresh():
+			return
+
+		payload = {
+			"mapType": self.map_type,
+			"language": self.language,
+			"region": self.region,
+			"imageFormat": self.preferred_image_format,
+		}
+
+		response = request_with_retries(
+			self.http_session,
+			"POST",
+			CREATE_SESSION_URL,
+			params={"key": self.api_key},
+			json_payload=payload,
+			timeout=self.timeout,
+			max_retries=self.max_retries,
+			backoff_seconds=self.backoff_seconds,
+		)
+		body = response.json()
+
+		session_id = body.get("session")
+		if not session_id:
+			raise RuntimeError("Google Map Tiles session response did not include session ID.")
+
+		self.tiles_session_id = session_id
+		self.expiry = parse_iso_datetime(body.get("expiry"))
+		self.tile_width = body.get("tileWidth", "")
+		self.tile_height = body.get("tileHeight", "")
+		self.image_format = normalize_image_format(
+			body.get("imageFormat", self.preferred_image_format)
+		)
+
+	def ensure_session(self):
+		if self._needs_refresh():
+			self.create_session(force=True)
+
+	def file_extension(self):
+		return image_format_to_extension(self.image_format)
+
+	def download_tile(self, zoom, tile_x, tile_y, out_path):
+		for attempt in range(2):
+			self.ensure_session()
+
+			url = TILE_URL_TEMPLATE.format(z=zoom, x=tile_x, y=tile_y)
+			params = {
+				"session": self.tiles_session_id,
+				"key": self.api_key,
+			}
+
+			try:
+				response = request_with_retries(
+					self.http_session,
+					"GET",
+					url,
+					params=params,
+					timeout=self.timeout,
+					max_retries=self.max_retries,
+					backoff_seconds=self.backoff_seconds,
+				)
+				safe_write_bytes(out_path, response.content)
+				return
+			except RuntimeError as exc:
+				status_code = extract_status_code(exc)
+				if status_code in SESSION_REFRESH_HTTP_STATUSES and attempt == 0:
+					logging.info(
+						"Refreshing tile session after HTTP %s for z=%s x=%s y=%s.",
+						status_code,
+						zoom,
+						tile_x,
+						tile_y,
+					)
+					self.create_session(force=True)
+					continue
+				raise
+
+		raise RuntimeError(
+			f"Tile download failed after session refresh: z={zoom}, x={tile_x}, y={tile_y}."
+		)
+
 def run():
 	setup_logging()
 	args = parse_args()
@@ -499,6 +656,19 @@ def run():
 			len(test_rows),
 			map_type,
 			zoom_levels,
+		)
+
+		tile_client = MapTilesClient(
+			session,
+			api_key=args.api_key,
+			map_type=map_type,
+			language=args.language,
+			region=args.region,
+			preferred_image_format=args.image_format,
+			timeout=args.timeout_seconds,
+			max_retries=args.max_retries,
+			backoff_seconds=args.retry_backoff_seconds,
+			refresh_seconds=args.session_refresh_seconds,
 		)
 
 
