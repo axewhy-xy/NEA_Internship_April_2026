@@ -35,8 +35,8 @@ import requests
 # -----------------------------
 # Defaults / constants
 # -----------------------------
-DEFAULT_INPUT_CSV = "Dataset/hdb_points_postal.csv"
-DEFAULT_OUTPUT_ROOT = Path("Dataset/Street_Metadata")
+DEFAULT_INPUT_CSV = "Dataset/Input/hdb_points_postal.csv"
+DEFAULT_OUTPUT_ROOT = Path("Dataset/Street")
 DEFAULT_COMBINED_METADATA = "street_metadata.csv"
 
 DEFAULT_RANDOM_SEED = 42

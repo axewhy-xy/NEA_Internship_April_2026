@@ -38,8 +38,8 @@ import requests
 # -----------------------------
 # Defaults / constants
 # -----------------------------
-DEFAULT_INPUT_CSV = "Dataset/hdb_points_postal.csv"
-DEFAULT_OUTPUT_ROOT = Path("Dataset/Satellite_Metadata")
+DEFAULT_INPUT_CSV = "Dataset/Input/hdb_points_postal.csv"
+DEFAULT_OUTPUT_ROOT = Path("Dataset/Satellite")
 DEFAULT_COMBINED_METADATA = "satellite_metadata.csv"
 
 DEFAULT_EE_PROJECT = os.getenv("GOOGLE_EE_PROJECT", "quixotic-booth-493203-p6")
@@ -735,9 +735,9 @@ def export_split(
 
 
 def ensure_output_dirs(output_root):
-    train_dir = output_root / "Training_Set"
-    valid_dir = output_root / "Validation_Set"
-    test_dir = output_root / "Test_Set"
+    train_dir = output_root / "Satellite_Training_Set"
+    valid_dir = output_root / "Satellite_Validation_Set"
+    test_dir = output_root / "Satellite_Test_Set"
 
     for directory in (train_dir, valid_dir, test_dir):
         directory.mkdir(parents=True, exist_ok=True)
