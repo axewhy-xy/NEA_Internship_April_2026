@@ -151,12 +151,14 @@ def parse_args():
 	)
 	return parser.parse_args()
 
+
 def setup_logging():
 	logging.basicConfig(
 		level=logging.INFO,
 		format="%(asctime)s | %(levelname)s | %(message)s",
 		datefmt="%Y-%m-%d %H:%M:%S",
 	)
+
 
 def validate_args(args):
 	if not args.api_key:
@@ -193,6 +195,7 @@ def validate_args(args):
 	# Validate zoom levels early for better UX.
 	parse_zoom_levels(args.zoom_levels)
 
+
 def parse_zoom_levels(zoom_levels_text):
 	levels = []
 	for token in zoom_levels_text.split(","):
@@ -209,7 +212,8 @@ def parse_zoom_levels(zoom_levels_text):
 		raise ValueError("At least one zoom level is required.")
 
 	# Preserve insertion order while deduplicating.
-	return list(dict.fromkeys(levels))	
+	return list(dict.fromkeys(levels))
+
 
 def _row_value(row, *keys):
 	for key in keys:
@@ -221,6 +225,11 @@ def _row_value(row, *keys):
 			return text
 	return None
 
+
+def sanitize_filename(value):
+	return re.sub(r"[^A-Za-z0-9._-]", "_", str(value))
+
+
 def normalize_image_format(image_format):
 	text = str(image_format or "").strip().lower()
 	if text.startswith("image/"):
@@ -229,15 +238,30 @@ def normalize_image_format(image_format):
 		text = "jpeg"
 	return text
 
-def ensure_output_dirs(output_root):
-	train_dir = output_root / "Map_Training_Set"
-	valid_dir = output_root / "Map_Validation_Set"
-	test_dir = output_root / "Map_Test_Set"
 
-	for directory in (train_dir, valid_dir, test_dir):
-		directory.mkdir(parents=True, exist_ok=True)
+def image_format_to_extension(image_format):
+	fmt = normalize_image_format(image_format)
+	if fmt == "jpeg":
+		return "jpg"
+	if fmt in {"png", "webp"}:
+		return fmt
+	return "bin"
 
-	return train_dir, valid_dir, test_dir
+
+def parse_iso_datetime(text):
+	if not text:
+		return None
+	raw = str(text).strip()
+	if raw.endswith("Z"):
+		raw = raw[:-1] + "+00:00"
+	try:
+		dt_obj = datetime.datetime.fromisoformat(raw)
+	except ValueError:
+		return None
+	if dt_obj.tzinfo is None:
+		dt_obj = dt_obj.replace(tzinfo=datetime.timezone.utc)
+	return dt_obj
+
 
 def request_with_retries(
 	session,
@@ -336,6 +360,7 @@ def geocode_postal_sg(
 	except (KeyError, TypeError, ValueError):
 		return None, None
 	return lat, lon
+
 
 def load_samples(
 	csv_path,
@@ -438,6 +463,7 @@ def load_samples(
 		raise ValueError(f"No valid samples loaded from {csv_path}.")
 	return rows
 
+
 def split_rows(rows, seed, train_ratio, valid_ratio):
 	rng = random.Random(seed)
 	rows_copy = rows[:]
@@ -452,38 +478,36 @@ def split_rows(rows, seed, train_ratio, valid_ratio):
 	test = rows_copy[n_train + n_valid :]
 	return train, valid, test
 
-def parse_iso_datetime(text):
-	if not text:
-		return None
-	raw = str(text).strip()
-	if raw.endswith("Z"):
-		raw = raw[:-1] + "+00:00"
-	try:
-		dt_obj = datetime.datetime.fromisoformat(raw)
-	except ValueError:
-		return None
-	if dt_obj.tzinfo is None:
-		dt_obj = dt_obj.replace(tzinfo=datetime.timezone.utc)
-	return dt_obj
 
-def image_format_to_extension(image_format):
-	fmt = normalize_image_format(image_format)
-	if fmt == "jpeg":
-		return "jpg"
-	if fmt in {"png", "webp"}:
-		return fmt
-	return "bin"
+def lat_lon_to_tile_xy(lat, lon, zoom):
+	lat_rad = math.radians(lat)
+	n = 2 ** zoom
 
-def safe_write_bytes(out_path, data):
-	temp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-	temp_path.write_bytes(data)
-	temp_path.replace(out_path)
-	
+	x_float = (lon + 180.0) / 360.0 * n
+	y_float = (
+		(1.0 - math.log(math.tan(lat_rad) + (1.0 / math.cos(lat_rad))) / math.pi) / 2.0
+	) * n
+
+	tile_x = int(x_float)
+	tile_y = int(y_float)
+
+	tile_x = min(max(tile_x, 0), n - 1)
+	tile_y = min(max(tile_y, 0), n - 1)
+	return tile_x, tile_y
+
+
 def extract_status_code(exc):
 	cause = exc.__cause__
 	if isinstance(cause, requests.HTTPError) and cause.response is not None:
 		return cause.response.status_code
 	return None
+
+
+def safe_write_bytes(out_path, data):
+	temp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+	temp_path.write_bytes(data)
+	temp_path.replace(out_path)
+
 
 class MapTilesClient:
 	def __init__(
@@ -609,27 +633,10 @@ class MapTilesClient:
 			f"Tile download failed after session refresh: z={zoom}, x={tile_x}, y={tile_y}."
 		)
 
-def lat_lon_to_tile_xy(lat, lon, zoom):
-	lat_rad = math.radians(lat)
-	n = 2 ** zoom
-
-	x_float = (lon + 180.0) / 360.0 * n
-	y_float = (
-		(1.0 - math.log(math.tan(lat_rad) + (1.0 / math.cos(lat_rad))) / math.pi) / 2.0
-	) * n
-
-	tile_x = int(x_float)
-	tile_y = int(y_float)
-
-	tile_x = min(max(tile_x, 0), n - 1)
-	tile_y = min(max(tile_y, 0), n - 1)
-	return tile_x, tile_y
-
-def sanitize_filename(value):
-	return re.sub(r"[^A-Za-z0-9._-]", "_", str(value))
 
 def write_metadata_row(writer, row):
 	writer.writerow([row.get(col, "") for col in METADATA_COLUMNS])
+
 
 def export_split(
 	rows,
@@ -729,6 +736,17 @@ def export_split(
 			time.sleep(min_delay_seconds)
 
 	return counters
+
+
+def ensure_output_dirs(output_root):
+	train_dir = output_root / "Map_Training_Set"
+	valid_dir = output_root / "Map_Validation_Set"
+	test_dir = output_root / "Map_Test_Set"
+
+	for directory in (train_dir, valid_dir, test_dir):
+		directory.mkdir(parents=True, exist_ok=True)
+
+	return train_dir, valid_dir, test_dir
 
 
 def run():
