@@ -229,6 +229,105 @@ def ensure_output_dirs(output_root):
 
 	return train_dir, valid_dir, test_dir
 
+def request_with_retries(
+	session,
+	method,
+	url,
+	*,
+	params=None,
+	json_payload=None,
+	timeout=30,
+	max_retries=4,
+	backoff_seconds=1.2,
+):
+	last_error = None
+	for attempt in range(max_retries + 1):
+		try:
+			response = session.request(
+				method,
+				url,
+				params=params,
+				json=json_payload,
+				timeout=timeout,
+			)
+
+			if response.status_code in RETRY_HTTP_STATUSES and attempt < max_retries:
+				wait_seconds = backoff_seconds ** (attempt + 1)
+				logging.warning(
+					"HTTP %s from %s. Retrying in %.2fs (%s/%s).",
+					response.status_code,
+					url,
+					wait_seconds,
+					attempt + 1,
+					max_retries,
+				)
+				time.sleep(wait_seconds)
+				continue
+
+			response.raise_for_status()
+			return response
+		except requests.RequestException as exc:
+			last_error = exc
+			if attempt >= max_retries:
+				break
+			wait_seconds = backoff_seconds ** (attempt + 1)
+			logging.warning(
+				"Request error on %s. Retrying in %.2fs (%s/%s): %s",
+				url,
+				wait_seconds,
+				attempt + 1,
+				max_retries,
+				exc,
+			)
+			time.sleep(wait_seconds)
+
+	raise RuntimeError(f"Request failed after retries: {url}") from last_error
+
+
+def geocode_postal_sg(
+	session,
+	postal_code,
+	timeout,
+	max_retries,
+	backoff_seconds,
+):
+	postal = str(postal_code).strip()
+	if not postal:
+		return None, None
+
+	params = {
+		"searchVal": postal,
+		"returnGeom": "Y",
+		"getAddrDetails": "Y",
+		"pageNum": 1,
+	}
+	response = request_with_retries(
+		session,
+		"GET",
+		ONEMAP_GEOCODE_URL,
+		params=params,
+		timeout=timeout,
+		max_retries=max_retries,
+		backoff_seconds=backoff_seconds,
+	)
+	payload = response.json()
+
+	if int(payload.get("found", 0)) == 0:
+		return None, None
+
+	results = payload.get("results") or []
+	if not results:
+		return None, None
+
+	first = results[0]
+	try:
+		lat = float(first["LATITUDE"])
+		lon = float(first["LONGITUDE"])
+	except (KeyError, TypeError, ValueError):
+		return None, None
+	return lat, lon
+
+
 def run():
 	setup_logging()
 	args = parse_args()
