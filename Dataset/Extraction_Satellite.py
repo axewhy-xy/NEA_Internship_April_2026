@@ -36,59 +36,59 @@ from pathlib import Path
 import ee
 import requests
 
-# -----------------------------
+# ----------------------------------------------------------------------------------------------------
 # Defaults / constants
-# -----------------------------
-DEFAULT_INPUT_CSV = "Dataset/Input/hdb_points_postal.csv"
-DEFAULT_OUTPUT_ROOT = Path("Dataset/Satellite")
-DEFAULT_COMBINED_METADATA = "satellite_metadata.csv"
+# ----------------------------------------------------------------------------------------------------
+DEFAULT_INPUT_CSV                                       = "Dataset/Input/hdb_points_postal.csv"
+DEFAULT_OUTPUT_ROOT                                     = Path("Dataset/Satellite")
+DEFAULT_COMBINED_METADATA                               = "satellite_metadata.csv"
 
-DEFAULT_EE_PROJECT = os.getenv("GOOGLE_EE_PROJECT", "quixotic-booth-493203-p6")
-DEFAULT_COLLECTION_ID = "COPERNICUS/S2_SR_HARMONIZED"
-DEFAULT_START_DATE = "2024-01-01"
-DEFAULT_END_DATE = "2024-12-31"
-DEFAULT_MAX_CLOUD = 20
+DEFAULT_EE_PROJECT                                      = os.getenv("GOOGLE_EE_PROJECT", "quixotic-booth-493203-p6")
+DEFAULT_COLLECTION_ID                                   = "COPERNICUS/S2_SR_HARMONIZED"
+DEFAULT_START_DATE                                      = "2024-01-01"
+DEFAULT_END_DATE                                        = "2024-12-31"
+DEFAULT_MAX_CLOUD                                       = 20
 
-DEFAULT_CRS = "EPSG:4326"
-DEFAULT_SCALE_M = 10
-DEFAULT_PATCH_SIZE_M = 320
+DEFAULT_CRS                                             = "EPSG:4326"
+DEFAULT_SCALE_M                                         = 10
+DEFAULT_PATCH_SIZE_M                                    = 320
 
-DEFAULT_RANDOM_SEED = 42
-DEFAULT_TRAIN_RATIO = 0.7
-DEFAULT_VALID_RATIO = 0.15
+DEFAULT_RANDOM_SEED                                     = 42
+DEFAULT_TRAIN_RATIO                                     = 0.7
+DEFAULT_VALID_RATIO                                     = 0.15
 
-DEFAULT_REQUEST_TIMEOUT_SECONDS = 120
-DEFAULT_MAX_RETRIES = 4
-DEFAULT_RETRY_BACKOFF_SECONDS = 1.2
-DEFAULT_MIN_DELAY_SECONDS = 0.2
-DEFAULT_GEOCODE_DELAY_SECONDS = 0.2
+DEFAULT_REQUEST_TIMEOUT_SECONDS                         = 120
+DEFAULT_MAX_RETRIES                                     = 4
+DEFAULT_RETRY_BACKOFF_SECONDS                           = 1.2
+DEFAULT_MIN_DELAY_SECONDS                               = 0.2
+DEFAULT_GEOCODE_DELAY_SECONDS                           = 0.2
 
-RETRY_HTTP_STATUSES = {429, 500, 502, 503, 504}
-ONEMAP_GEOCODE_URL = "https://www.onemap.gov.sg/api/common/elastic/search"
+RETRY_HTTP_STATUSES                                     = {429, 500, 502, 503, 504}
+ONEMAP_GEOCODE_URL                                      = "https://www.onemap.gov.sg/api/common/elastic/search"
 
-METADATA_COLUMNS = [
-    "id",
-    "lat",
-    "lon",
-    "postal_code",
-    "label",
-    "split",
-    "path",
-    "status",
-    "error",
-    "collection_id",
-    "start_date",
-    "end_date",
-    "max_cloud",
-    "scale_m",
-    "patch_size_m",
-    "crs",
-]
+METADATA_COLUMNS                                        = [
+                                                            "id",
+                                                            "lat",
+                                                            "lon",
+                                                            "postal_code",
+                                                            "label",
+                                                            "split",
+                                                            "path",
+                                                            "status",
+                                                            "error",
+                                                            "collection_id",
+                                                            "start_date",
+                                                            "end_date",
+                                                            "max_cloud",
+                                                            "scale_m",
+                                                            "patch_size_m",
+                                                            "crs",
+                                                        ]
 
 '''
-------------------------------
-parse_args()
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# parse_args()
+# ----------------------------------------------------------------------------------------------------
 Description:
 Defines and parses command-line arguments for the dataset extraction script.
 Includes validation for argument values and formats.
@@ -159,9 +159,9 @@ def parse_args():
     return parser.parse_args()
 
 '''
-------------------------------
-setup_logging()
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# setup_logging()
+# ----------------------------------------------------------------------------------------------------
 Description:
 Configures the logging settings for the script, including log level, format,
 and timestamp format. logs will be printed to the console with INFO level and
@@ -181,9 +181,9 @@ def setup_logging():
     )
 
 '''
-------------------------------
-validate_args(args)
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# validate_args(args)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Validates the command-line arguments to ensure they meet expected formats and constraints.
 The function checks for valid split ratios, cloud cover percentage, scale and patch sizes,
@@ -229,9 +229,9 @@ def validate_args(args):
         raise ValueError("--start-date must be <= --end-date.")
 
 '''
-------------------------------
-_row_value(row, *keys)
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# _row_value(row, *keys)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Helper function to extract a value from a dictionary row using multiple
 possible keys. It iterates through the provided keys and returns the first
@@ -256,10 +256,10 @@ def _row_value(row, *keys):
     return None
 
 '''
-------------------------------
-request_with_retries(session, method, url, *, params=None,
-                     timeout=30, max_retries=4, backoff_seconds=1.2)
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# request_with_retries(session, method, url, *, params=None,
+#                      timeout=30, max_retries=4, backoff_seconds=1.2)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Performs a HTTP request with retries and exponential backoff for handling transient errors.
 The function uses a requests.Session to make the request and retries on specific HTTP status
@@ -328,10 +328,10 @@ def request_with_retries(
     raise RuntimeError(f"Request failed after retries: {url}") from last_error
 
 '''
--------------------------------
-geocode_postal_sg(session, postal_code, timeout,
-                  max_retries, backoff_seconds)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# geocode_postal_sg(session, postal_code, timeout,
+#                   max_retries, backoff_seconds)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Geocodes a Singapore postal code to latitude and longitude using the OneMap API.
 The function sends a GET request to the OneMap geocoding endpoint with the postal
@@ -394,10 +394,10 @@ def geocode_postal_sg(
     return lat, lon
 
 '''
--------------------------------
-load_samples(csv_path, session, timeout, max_retries, backoff_seconds,
-             geocode_delay_seconds)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# load_samples(csv_path, session, timeout, max_retries, backoff_seconds,
+#              geocode_delay_seconds)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Loads samples from the input CSV file, extracting IDs, labels, and either
 latitude/longitude or postal codes. The function supports multiple column
@@ -514,9 +514,9 @@ def load_samples(
     return rows
 
 '''
--------------------------------
-split_rows(rows, seed, train_ratio, valid_ratio)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# split_rows(rows, seed, train_ratio, valid_ratio)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Splits a list of sample rows into training, validation, and test sets based
 on specified ratios. The function uses a random seed for reproducibility and
@@ -549,9 +549,9 @@ def split_rows(rows, seed, train_ratio, valid_ratio):
     return train, valid, test
 
 '''
---------------------------------
-initialize_earth_engine(project)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# initialize_earth_engine(project)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Initializes the Google Earth Engine API with the specified project. If a project ID is provided,
 it attempts to initialize with that project; otherwise, it uses the default initialization. If
@@ -580,9 +580,9 @@ def initialize_earth_engine(project):
         ) from exc
 
 '''
--------------------------------
-mask_s2_clouds(image)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# mask_s2_clouds(image)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Applies a cloud and cirrus mask to a Sentinel-2 image using the QA60 band. The function
 selects the QA60 band, identifies cloud and cirrus pixels based on specific bits, and 
@@ -604,9 +604,9 @@ def mask_s2_clouds(image):
     return image.updateMask(cloud.And(cirrus)).divide(10000)
 
 '''
---------------------------------
-build_composite(aoi, collection_id, start_date, end_date, max_cloud)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# build_composite(aoi, collection_id, start_date, end_date, max_cloud)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Builds a composite image from an Earth Engine image collection filtered by the specified
 parameters. The function filters the collection by the area of interest (AOI), date range,
@@ -637,9 +637,9 @@ def build_composite(aoi, collection_id, start_date, end_date, max_cloud):
     return collection.median().select(["B4", "B3", "B2"])
 
 '''
---------------------------------
-build_aoi(rows)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# build_aoi(rows)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Constructs an area of interest (AOI) geometry from a list of sample rows. The function creates
 a point geometry for each sample using its latitude and longitude, then combines all points into
@@ -659,9 +659,9 @@ def build_aoi(rows):
     return ee.FeatureCollection(features).geometry().convexHull()
 
 '''
---------------------------------
-square_region(lon, lat, patch_size_m)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# square_region(lon, lat, patch_size_m)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Generates a square region geometry centered around a given longitude and latitude with a specified size
 in meters. The function creates a point geometry at the specified coordinates, then applies a buffer
@@ -683,9 +683,9 @@ def square_region(lon, lat, patch_size_m):
     return point.buffer(patch_size_m / 2).bounds()
 
 '''
---------------------------------
-get_patch_download_url(image, lon, lat, *, scale_m, patch_size_m, crs)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# get_patch_download_url(image, lon, lat, *, scale_m, patch_size_m, crs)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Generates a download URL for a satellite image patch centered on the specified longitude
 and latitude. The function creates a square region around the coordinates using the square_region
@@ -718,9 +718,9 @@ def get_patch_download_url(image, lon, lat, *, scale_m, patch_size_m, crs):
     )
 
 '''
---------------------------------
-download_patch(session, url, *, out_path, timeout, max_retries, backoff_seconds)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# download_patch(session, url, *, out_path, timeout, max_retries, backoff_seconds)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Downloads an image patch from the specified URL and saves it to the given output path.
 The function uses the request_with_retries function to handle the HTTP request with retries
@@ -760,9 +760,9 @@ def download_patch(
     out_path.write_bytes(response.content)
 
 '''
---------------------------------
-sanitize_filename(value)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# sanitize_filename(value)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Sanitizes a string value to create a safe filename by replacing any characters that are not
 alphanumeric, dot, underscore, or hyphen with an underscore. This function is used to ensure 
@@ -779,9 +779,9 @@ def sanitize_filename(value):
     return re.sub(r"[^A-Za-z0-9._-]", "_", str(value))
 
 '''
---------------------------------
-write_metadata_row(writer, row)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# write_metadata_row(writer, row)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Writes a single row of metadata to a CSV file using the provided csv.writer object. The function
 ensures that the values are written in the order specified by the METADATA_COLUMNS list. It retrieves
@@ -801,12 +801,12 @@ def write_metadata_row(writer, row):
     writer.writerow([row.get(col, "") for col in METADATA_COLUMNS])
 
 '''
---------------------------------
-export_split(rows, split_dir, split_name, *, session, image, collection_id,
-             start_date, end_date, max_cloud, scale_m, patch_size_m, crs,
-             timeout, max_retries, backoff_seconds, min_delay_seconds,
-             metadata_only, combined_writer, split_writer)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# export_split(rows, split_dir, split_name, *, session, image, collection_id,
+#              start_date, end_date, max_cloud, scale_m, patch_size_m, crs,
+#              timeout, max_retries, backoff_seconds, min_delay_seconds,
+#              metadata_only, combined_writer, split_writer)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Processes a list of sample rows for a specific data split (train/validation/test), generating download URLs
 for satellite image patches, downloading the patches, and writing metadata for each sample. The function iterates
@@ -1003,9 +1003,9 @@ def export_split(
     return counters
 
 '''
---------------------------------
-ensure_output_dirs(output_root)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# ensure_output_dirs(output_root)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Ensures that the necessary output directories for the training, validation, and test splits 
 exist under the specified output root directory. The function constructs the paths for each 
@@ -1030,9 +1030,9 @@ def ensure_output_dirs(output_root):
     return train_dir, valid_dir, test_dir
 
 '''
---------------------------------
-run()
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# run()
+# ----------------------------------------------------------------------------------------------------
 Description:
 The main execute function that orchestrates the entire process of loading samples, 
 splitting them into train/validation/test sets, initializing Earth Engine, building 

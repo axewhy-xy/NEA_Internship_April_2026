@@ -33,58 +33,58 @@ from pathlib import Path
 
 import requests
 
-# -----------------------------
+# ----------------------------------------------------------------------------------------------------
 # Defaults / constants
-# -----------------------------
-DEFAULT_INPUT_CSV = "Dataset/Input/hdb_points_postal.csv"
-DEFAULT_OUTPUT_ROOT = Path("Dataset/Street")
-DEFAULT_COMBINED_METADATA = "street_metadata.csv"
+# ----------------------------------------------------------------------------------------------------
+DEFAULT_INPUT_CSV 										= "Dataset/Input/hdb_points_postal.csv"
+DEFAULT_OUTPUT_ROOT 									= Path("Dataset/Street")
+DEFAULT_COMBINED_METADATA 								= "street_metadata.csv"
 
-DEFAULT_RANDOM_SEED = 42
-DEFAULT_TRAIN_RATIO = 0.7
-DEFAULT_VALID_RATIO = 0.15
+DEFAULT_RANDOM_SEED 									= 42
+DEFAULT_TRAIN_RATIO 									= 0.7
+DEFAULT_VALID_RATIO 									= 0.15
 
-DEFAULT_HEADINGS = (0, 90, 180, 270)
-DEFAULT_PITCH = 0
-DEFAULT_FOV = 90
-DEFAULT_SIZE = "640x640"
-DEFAULT_RADIUS = 50
-DEFAULT_SOURCE = "outdoor"
+DEFAULT_HEADINGS 										= (0, 90, 180, 270)
+DEFAULT_PITCH 											= 0
+DEFAULT_FOV 											= 90
+DEFAULT_SIZE 											= "640x640"
+DEFAULT_RADIUS 											= 50
+DEFAULT_SOURCE 											= "outdoor"
 
-DEFAULT_REQUEST_TIMEOUT_SECONDS = 30
-DEFAULT_MAX_RETRIES = 4
-DEFAULT_RETRY_BACKOFF_SECONDS = 1.2
-DEFAULT_MIN_DELAY_SECONDS = 0.2
-DEFAULT_GEOCODE_DELAY_SECONDS = 0.2
+DEFAULT_REQUEST_TIMEOUT_SECONDS 						= 30
+DEFAULT_MAX_RETRIES 									= 4
+DEFAULT_RETRY_BACKOFF_SECONDS 							= 1.2
+DEFAULT_MIN_DELAY_SECONDS 								= 0.2
+DEFAULT_GEOCODE_DELAY_SECONDS 							= 0.2
 
-RETRY_HTTP_STATUSES = {429, 500, 502, 503, 504}
+RETRY_HTTP_STATUSES 									= {429, 500, 502, 503, 504}
 
-METADATA_URL = "https://maps.googleapis.com/maps/api/streetview/metadata"
-IMAGE_URL = "https://maps.googleapis.com/maps/api/streetview"
-ONEMAP_GEOCODE_URL = "https://www.onemap.gov.sg/api/common/elastic/search"
+METADATA_URL 											= "https://maps.googleapis.com/maps/api/streetview/metadata"
+IMAGE_URL 												= "https://maps.googleapis.com/maps/api/streetview"
+ONEMAP_GEOCODE_URL 										= "https://www.onemap.gov.sg/api/common/elastic/search"
 
-METADATA_COLUMNS = [
-	"id",
-	"lat",
-	"lon",
-	"postal_code",
-	"label",
-	"split",
-	"heading",
-	"pitch",
-	"fov",
-	"size",
-	"pano_id",
-	"capture_date",
-	"status",
-	"path",
-	"error",
-]
+METADATA_COLUMNS 										= [
+															"id",
+															"lat",
+															"lon",
+															"postal_code",
+															"label",
+															"split",
+															"heading",
+															"pitch",
+															"fov",
+															"size",
+															"pano_id",
+															"capture_date",
+															"status",
+															"path",
+															"error",
+														]
 
 '''
-------------------------------
-parse_args()
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# parse_args()
+# ----------------------------------------------------------------------------------------------------
 Description:
 Defines and parse command-line arguments for the dataset extraction script.
 Supports configuration of input/output paths, API key, dataset split ratios,
@@ -153,9 +153,9 @@ def parse_args():
 	return parser.parse_args()
 
 '''
-------------------------------
-setup_logging()
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# setup_logging()
+# ----------------------------------------------------------------------------------------------------
 Description:
 Configures logging to output timestamped messages to the console.
 Sets log level to INFO and defines a consistent log message format.
@@ -168,9 +168,9 @@ def setup_logging():
 	)
 
 '''
-------------------------------
-validate_args(args)
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# validate_args(args)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Validates the command-line arguments for correctness and consistency.
 Checks for presence of API key, valid split ratios, correct size format, and valid FOV range.
@@ -194,9 +194,9 @@ def validate_args(args):
 		raise ValueError("--fov must be between 0 and 120.")
 
 '''
-------------------------------
-parse_headings(headings_text)
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# parse_headings(headings_text)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Parses a comma-separated string of headings into a list of unique integers.
 
@@ -224,9 +224,9 @@ def parse_headings(headings_text):
 	return list(dict.fromkeys(values))
 
 '''
-------------------------------
-_row_value(row, *keys)
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# _row_value(row, *keys)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Helper function to extract the first non-empty value from a dictionary row based on multiple possible keys.
 Iterates through the provided keys in order, checks if the key exists in the row, and
@@ -250,9 +250,9 @@ def _row_value(row, *keys):
 	return None
 
 '''
-------------------------------
-request_with_retries(session, method, url, *, params=None, timeout=30, max_retries=4, backoff_seconds=1.2)
-------------------------------
+# ----------------------------------------------------------------------------------------------------
+# request_with_retries(session, method, url, *, params=None, timeout=30, max_retries=4, backoff_seconds=1.2)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Performs an HTTP request with retries and exponential backoff for transient errors.
 Uses the provided requests.Session to make the request, and retries on specified HTTP status codes or request
@@ -321,10 +321,10 @@ def request_with_retries(
 	raise RuntimeError(f"Request failed after retries: {url}") from last_error
 
 '''
--------------------------------
-geocode_postal_sg(session, postal_code, timeout, max_retries, backoff_seconds)
--------------------------------
-Desciription:
+# ----------------------------------------------------------------------------------------------------
+# geocode_postal_sg(session, postal_code, timeout, max_retries, backoff_seconds)
+# ----------------------------------------------------------------------------------------------------
+Description:
 Geocodes a Singapore postal code using the OneMap API to obtain latitude and longitude coordinates.
 Sends a GET request to the OneMap geocoding endpoint with the postal code as a
 query parameter, and parses the response to extract the first result's latitude and longitude.
@@ -384,9 +384,9 @@ def geocode_postal_sg(
 	return lat, lon
 
 '''
--------------------------------
-load_samples(csv_path, session, timeout, max_retries, backoff_seconds, geocode_delay_seconds)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# load_samples(csv_path, session, timeout, max_retries, backoff_seconds, geocode_delay_seconds)
+# ----------------------------------------------------------------------------------------------------
 Description:
 loads location samples from a CSV file, supporting both coordinate and postal code formats.
 for rows with postal codes, performs geocoding to obtain lat/lon coordinates using the OneMap API.
@@ -492,9 +492,9 @@ def load_samples(
 	return rows
 
 '''
--------------------------------
-split_rows(rows, seed, train_ratio, valid_ratio)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# split_rows(rows, seed, train_ratio, valid_ratio)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Splits a list of rows into train, validation, and test sets based on specified ratios.
 Shuffles the rows using a random seed for reproducibility, then calculates the number of
@@ -526,10 +526,10 @@ def split_rows(rows, seed, train_ratio, valid_ratio):
 	return train, valid, test
 
 '''
--------------------------------
-get_streetview_metadata(session, api_key, lat, lon, radius, 
-                        source, timeout, max_retries, backoff_seconds)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# get_streetview_metadata(session, api_key, lat, lon, radius, 
+#                         source, timeout, max_retries, backoff_seconds)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Queries the Google Street View Metadata API for a specific location defined by latitude and longitude.
 Send a GET request to the metadat endpoint with the provided parameters, including search radius and 
@@ -580,11 +580,11 @@ def get_streetview_metadata(
 	return response.json()
 
 '''
--------------------------------
-download_streetview_image(session, api_key, *, out_path, heading, 
-                          pitch, fov, size, source, timeout, max_retries, 
-						  backoff_seconds, pano_id=None, lat=None, lon=None)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# download_streetview_image(session, api_key, *, out_path, heading, 
+#                           pitch, fov, size, source, timeout, max_retries, 
+#  						    backoff_seconds, pano_id=None, lat=None, lon=None)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Downloads a Street View image from the Google Street View API based on either a 
 pano_id or a location defined by latitude and longitude. Constructs the appropriate
@@ -660,9 +660,9 @@ def download_streetview_image(
 	out_path.write_bytes(response.content)
 
 '''
--------------------------------
-sanitize_filename(value)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# sanitize_filename(value)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Sanitizes a string value to be safe for use as a filename by replacing any
 characters that are not alphanumeric, dot, underscore, or hyphen with an underscore.
@@ -679,9 +679,9 @@ def sanitize_filename(value):
 	return re.sub(r"[^A-Za-z0-9._-]", "_", str(value))
 
 '''
--------------------------------
-write_metadata_row(writer, row)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# write_metadata_row(writer, row)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Writes a row of metadata to a CSV file using the provided CSV writer object.
 Extracts the values for the predefined METADATA_COLUMNS from the input row dictionary,
@@ -701,11 +701,11 @@ def write_metadata_row(writer, row):
 	writer.writerow([row.get(col, "") for col in METADATA_COLUMNS])
 
 '''
--------------------------------
-export_split(rows, split_dir, split_name, *, session, api_key, headings, pitch, fov,
-			 size, radius, source, timeout, max_retries, backoff_seconds, 
-			 min_delay_seconds, metadata_only, combined_writer, split_writer)
--------------------------------
+# ----------------------------------------------------------------------------------------------------
+# export_split(rows, split_dir, split_name, *, session, api_key, headings, pitch, fov,
+# 			   size, radius, source, timeout, max_retries, backoff_seconds, 
+# 			   min_delay_seconds, metadata_only, combined_writer, split_writer)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Processes a list of rows for a specific dataset split (train/valid/test) by querying
 Street View metadata and downloading images for each sample. For each row, it retrieves
@@ -938,9 +938,9 @@ def export_split(
 	return counters
 
 '''
---------------------------------
-ensure_output_dirs(output_root)
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# ensure_output_dirs(output_root)
+# ----------------------------------------------------------------------------------------------------
 Description:
 Ensures that the necessary output directories for the dataset splits
 (train, validation, test) exist within the specified output root directory.
@@ -964,9 +964,9 @@ def ensure_output_dirs(output_root):
 	return train_dir, valid_dir, test_dir
 
 '''
---------------------------------
-run()
---------------------------------
+# ----------------------------------------------------------------------------------------------------
+# run()
+# ----------------------------------------------------------------------------------------------------
 Description:
 The main execution function for the dataset extraction script. It sets 
 up logging, parses and validates command-line arguments, loads samples
