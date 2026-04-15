@@ -3,6 +3,7 @@ Dataset extraction script for Google Maps Street View images.
 
 Author: AxeWhy
 Date: 2026-04-14
+Last updated: 2026-04-14
 
 Description:
 Builds a Street View image dataset from a CSV of locations and labels.

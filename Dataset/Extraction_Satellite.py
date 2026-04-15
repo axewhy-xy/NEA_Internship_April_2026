@@ -4,6 +4,7 @@ Dataset extraction script for satellite image patches from Google Earth Engine.
 
 Author: AxeWhy
 Date: 2026-04-13
+Last updated: 2026-04-15
 
 Description:
 Builds a satellite patch dataset from a CSV of locations and labels.
