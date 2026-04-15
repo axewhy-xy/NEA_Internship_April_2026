@@ -392,7 +392,40 @@ def geocode_postal_sg(
         return None, None
     return lat, lon
 
+'''
+-------------------------------
+load_samples(csv_path, session, timeout, max_retries, backoff_seconds,
+             geocode_delay_seconds)
+-------------------------------
+Description:
+Loads samples from the input CSV file, extracting IDs, labels, and either
+latitude/longitude or postal codes. The function supports multiple column
+name variations for each field. If latitude and longitude are provided, it
+parses them as floats. If only a postal code is provided, it uses the 
+geocode_postal_sg function to obtain the corresponding latitude and longitude.
+The function handles errors gracefully, logging warnings for invalid rows and
+skipping them. It returns a list of valid sample dictionaries with keys:
+id, lat, lon, label, and postal_code (if applicable).
 
+Arguments:
+csv_path: Path to the input CSV file containing sample data.
+session: requests.Session object to use for making HTTP requests (e.g., for geocoding).
+timeout: Timeout in seconds for HTTP requests.
+max_retries: Maximum number of retry attempts for failed HTTP requests.
+backoff_seconds: Base seconds for exponential backoff between retries for HTTP requests.
+geocode_delay_seconds: Delay in seconds between geocoding requests to avoid rate limits.
+
+Returns:
+A list of dictionaries, each representing a valid sample with keys:
+- id: Sample identifier (string).
+- lat: Latitude of the sample location (float).
+- lon: Longitude of the sample location (float).
+- label: Label associated with the sample (string).
+- postal_code: Postal code associated with the sample (string, may be empty if not applicable).
+
+Raises:
+ValueError if no valid samples are loaded from the CSV file.
+'''
 def load_samples(
     csv_path,
     session,
@@ -479,7 +512,27 @@ def load_samples(
         raise ValueError(f"No valid samples loaded from {csv_path}.")
     return rows
 
+'''
+-------------------------------
+split_rows(rows, seed, train_ratio, valid_ratio)
+-------------------------------
+Description:
+Splits a list of sample rows into training, validation, and test sets based
+on specified ratios. The function uses a random seed for reproducibility and
+shuffles the rows before splitting. It calculates the number of samples for
+each split based on the provided ratios and returns three seperate list for
+train, validation, and test splits.
 
+Arguments:
+rows: List of sample dictionaries to be split.
+seed: Random seed for shuffling the rows to ensure reproducibility.
+train_ratio: Proportion of samples to assign to the training set (e.g., 0.7).
+valid_ratio: Proportion of samples to assign to the validation set (e.g., 0.15).
+
+Returns:
+A tuple containing three lists: (train_rows, valid_rows, test_rows), where each list
+contains the sample dictionaries assigned to the respective split.
+'''
 def split_rows(rows, seed, train_ratio, valid_ratio):
     rng = random.Random(seed)
     rows_copy = rows[:]
@@ -494,7 +547,26 @@ def split_rows(rows, seed, train_ratio, valid_ratio):
     test = rows_copy[n_train + n_valid :]
     return train, valid, test
 
+'''
+--------------------------------
+initialize_earth_engine(project)
+--------------------------------
+Description:
+Initializes the Google Earth Engine API with the specified project. If a project ID is provided,
+it attempts to initialize with that project; otherwise, it uses the default initialization. If
+initialization fails (e.g., due to authentication issues), it raises a RuntimeError with a 
+descriptive message instructing the user to authenticate and set the appropriate project.
+This function is essential for ensuring that the Earth Engine API is ready for subsequent
+operations such as building composites and downloading patches.
 
+Arguments:
+project: (Optional) Google Earth Engine project ID to use for API access. 
+If None, default initialization is attempted.
+
+Returns:
+None if initialization is successful; 
+Raises RuntimeError if initialization fails.
+'''
 def initialize_earth_engine(project):
     try:
         if project:
@@ -506,14 +578,53 @@ def initialize_earth_engine(project):
             "Earth Engine initialization failed. Authenticate and set --ee-project or GOOGLE_EE_PROJECT."
         ) from exc
 
+'''
+-------------------------------
+mask_s2_clouds(image)
+-------------------------------
+Description:
+Applies a cloud and cirrus mask to a Sentinel-2 image using the QA60 band. The function
+selects the QA60 band, identifies cloud and cirrus pixels based on specific bits, and 
+updates the image mask to exclude those pixels. The resulting masked image is then scaled
+by dividing by 10000 to convert from integer reflectance value to float reflectance. This
+function is used in the mapping step when building the composite image to ensure that only
+cloud-free pixels are included in the final composite.
 
+Arguments:
+image: ee.Image object representing a Sentinel-2 image to be masked.
+
+Returns:
+An ee.Image object with clouds and cirrus masked out and reflectance values scaled.
+'''
 def mask_s2_clouds(image):
     qa = image.select("QA60")
     cloud = qa.bitwiseAnd(1 << 10).eq(0)
     cirrus = qa.bitwiseAnd(1 << 11).eq(0)
     return image.updateMask(cloud.And(cirrus)).divide(10000)
 
+'''
+--------------------------------
+build_composite(aoi, collection_id, start_date, end_date, max_cloud)
+--------------------------------
+Description:
+Builds a composite image from an Earth Engine image collection filtered by the specified
+parameters. The function filters the collection by the area of interest (AOI), date range,
+and maximum cloud cover percentage. It then applies the mask_s2_clouds function to each image
+in the collection to remove cloudy pixels. Finally, it computes the median composite of the
+filtered and masked collection and selects the RGB bands (B4, B3, B2) for the final output.
+This composite image is used as the source for downloading patches corresponding to the sample
+locations.
 
+Arguments:
+aoi: ee.Geometry object representing the area of interest for filtering the image collection.
+collection_id: String ID of the Earth Engine image collection to query (e.g., "COPERNICUS/S2_SR_HARMONIZED").
+start_date: String representing the start date for filtering images (YYYY-MM-DD).
+end_date: String representing the end date for filtering images (YYYY-MM-DD).
+max_cloud: Integer representing the maximum cloud cover percentage for filtering images.
+
+Returns:
+An ee.Image object representing the median composite of the filtered and masked image collection, with RGB bands selected.
+'''
 def build_composite(aoi, collection_id, start_date, end_date, max_cloud):
     collection = (
         ee.ImageCollection(collection_id)
@@ -524,17 +635,76 @@ def build_composite(aoi, collection_id, start_date, end_date, max_cloud):
     )
     return collection.median().select(["B4", "B3", "B2"])
 
+'''
+--------------------------------
+build_aoi(rows)
+--------------------------------
+Description:
+Constructs an area of interest (AOI) geometry from a list of sample rows. The function creates
+a point geometry for each sample using its latitude and longitude, then combines all points into
+a single feature collection. It computes the convex hull of the feature collection to creat a polygon
+that encompasses all sample locations. This AOI is used for filtering the Earth Engine image collection
+to ensure that only images covering the sample locations are included in the composite.
 
+Arguments:
+rows: List of sample dictionaries, each containing 'lat' and 'lon' keys for the sample's location.
+
+Returns:
+An ee.Geometry object representing the convex hull of the sample locations, which serves as the area of
+interest for Earth Engine queries.
+'''
 def build_aoi(rows):
     features = [ee.Feature(ee.Geometry.Point([row["lon"], row["lat"]])) for row in rows]
     return ee.FeatureCollection(features).geometry().convexHull()
 
+'''
+--------------------------------
+square_region(lon, lat, patch_size_m)
+--------------------------------
+Description:
+Generates a square region geometry centered around a given longitude and latitude with a specified size
+in meters. The function creates a point geometry at the specified coordinates, then applies a buffer
+to create a circular area with a radius equal to half the patch size. Finally, it computes the bounding
+box of the buffered area to produce a square region. This region is used as the area parameter when
+requesting downloads from Earth Engine, ensuring that the downloaded patch is centered on the sample location
+and has the correct dimensions.
 
+Arguments:
+lon: Longitude of the center point for the region.
+lat: Latitude of the center point for the region.
+patch_size_m: Size of the square patch in meters (the function will create a region that is patch_size_m x patch_size_m).
+
+Returns:
+An ee.Geometry object representing the square region centered on the specified coordinates.
+'''
 def square_region(lon, lat, patch_size_m):
     point = ee.Geometry.Point([lon, lat])
     return point.buffer(patch_size_m / 2).bounds()
 
+'''
+--------------------------------
+get_patch_download_url(image, lon, lat, *, scale_m, patch_size_m, crs)
+--------------------------------
+Description:
+Generates a download URL for a satellite image patch centered on the specified longitude
+and latitude. The function creates a square region around the coordinates using the square_region
+function, then calls the getDownloadURL function on the Earth Engine image object with the specified
+parameters for region, scale, coordinate reference system (CRS), and format. The resulting URL can
+be used to download the image patch corresponding to the sample location. This function is called 
+for each sample to obtain the appropriate download URL based on its coordinates and the desired patch 
+specifications.
 
+Arguments:
+image: ee.Image object representing the composite image from which to download patches.
+lon: Longitude of the center point for the patch.
+lat: Latitude of the center point for the patch.
+scale_m: Scale in meters per pixel for the downloaded patch.
+patch_size_m: Size of the square patch in meters.
+crs: Coordinate reference system for the downloaded patch (e.g., "EPSG:4326").
+
+Returns:
+A string URL that can be used to download the specified image patch from Earth Engine.
+'''
 def get_patch_download_url(image, lon, lat, *, scale_m, patch_size_m, crs):
     region = square_region(lon, lat, patch_size_m)
     return image.getDownloadURL(
@@ -546,7 +716,29 @@ def get_patch_download_url(image, lon, lat, *, scale_m, patch_size_m, crs):
         }
     )
 
+'''
+--------------------------------
+download_patch(session, url, *, out_path, timeout, max_retries, backoff_seconds)
+--------------------------------
+Description:
+Downloads an image patch from the specified URL and saves it to the given output path.
+The function uses the request_with_retries function to handle the HTTP request with retries
+and backoff in case of transient errors. If the download is successful, it writes the content
+of the response to the specified output path as a binary file. If the download fails after all
+retries, it raises a RuntimeError with a descriptive message.
 
+Arguments:
+session: requests.Session object to use for making the HTTP request.
+url: The URL from which to download the image patch.
+out_path: Path object representing the file path where the downloaded patch should be saved.
+timeout: Timeout in seconds for the HTTP request.
+max_retries: Maximum number of retry attempts for failed HTTP requests.
+backoff_seconds: Base seconds for exponential backoff between retries for HTTP requests.
+
+Returns:
+None if the download is successful and the file is saved;
+Raises RuntimeError if the download fails after all retry attempts, with a descriptive message.
+'''
 def download_patch(
     session,
     url,
@@ -566,15 +758,91 @@ def download_patch(
     )
     out_path.write_bytes(response.content)
 
+'''
+--------------------------------
+sanitize_filename(value)
+--------------------------------
+Description:
+Sanitizes a string value to create a safe filename by replacing any characters that are not
+alphanumeric, dot, underscore, or hyphen with an underscore. This function is used to ensure 
+that sample IDs or other values used in filenames do not contain characters that could cause 
+issue in file systems. It uses a regular expression to identify and replace invalid characters.
 
+Arguments:
+value: The input value (e.g., sample ID) to be sanitized for use in a filename.
+
+Returns:
+A sanitized string that is safe to use as a filename, with invalid characters replaced by underscores.
+'''
 def sanitize_filename(value):
     return re.sub(r"[^A-Za-z0-9._-]", "_", str(value))
 
+'''
+--------------------------------
+write_metadata_row(writer, row)
+--------------------------------
+Description:
+Writes a single row of metadata to a CSV file using the provided csv.writer object. The function
+ensures that the values are written in the order specified by the METADATA_COLUMNS list. It retrieves
+each value from the row dictionary using the get function, providing an empty string as a default if
+the key is missing. This function is used to write metadata for each sample to both the combined metadata
+CSV and the split-specific metadata CSV, ensuring consistent formatting and handling of missing values.
 
+Arguments:
+writer: A csv.writer object that has been initialized with the appropriate file and header.
+row: A dictionary containing metadata values for a sample, with keys corresponding to the 
+     columns defined in METADATA_COLUMNS.
+
+Returns:
+None; the function writes a row to the CSV file using the provided writer.
+'''
 def write_metadata_row(writer, row):
     writer.writerow([row.get(col, "") for col in METADATA_COLUMNS])
 
+'''
+--------------------------------
+export_split(rows, split_dir, split_name, *, session, image, collection_id,
+             start_date, end_date, max_cloud, scale_m, patch_size_m, crs,
+             timeout, max_retries, backoff_seconds, min_delay_seconds,
+             metadata_only, combined_writer, split_writer)
+--------------------------------
+Description:
+Processes a list of sample rows for a specific data split (train/validation/test), generating download URLs
+for satellite image patches, downloading the patches, and writing metadata for each sample. The function iterates
+through each sample row, attempts to generate a download URL using the get_patch_download_url function, and 
+handles any exceptions that occur during URL generation by logging a warning and writing an error entry to the
+metadata CSVs. If URL generation is successful and metadata_only is not set, it proceeds to download the patch 
+using the download_patch function, handling any exceptions during download similarly. For each sample, it writes
+a metadata row to both the combined metadata CSV and the split-specific metadata CSV, including the status of the
+operation ("OK", "URL_FAILED", "DOWNLOAD_FAILED", etc.) and any error messages. The function also maintains counters
+for the number of samples processed, metadata successes/failures, and image download successes/failures, which it
+returns at the end for logging purposes.
 
+Arguments:
+rows: List of sample dictionaries to process for the split.
+split_dir: Path object representing the directory where downloaded patches for this split should be saved.
+split_name: String name of the split (e.g., "train", "valid", "test") for metadata recording.
+session: requests.Session object to use for making HTTP requests.
+image: ee.Image object representing the composite image from which to download patches.
+collection_id: String ID of the Earth Engine image collection used for metadata recording.
+start_date: String representing the start date for filtering images, used for metadata recording.
+end_date: String representing the end date for filtering images, used for metadata recording.
+max_cloud: Integer representing the maximum cloud cover percentage for filtering images, used for metadata recording.
+scale_m: Scale in meters per pixel for the downloaded patches, used for metadata recording.
+patch_size_m: Size of the square patch in meters, used for metadata recording.
+crs: Coordinate reference system for the downloaded patches, used for metadata recording.
+timeout: Timeout in seconds for HTTP requests.
+max_retries: Maximum number of retry attempts for failed HTTP requests.
+backoff_seconds: Base seconds for exponential backoff between retries for HTTP requests.
+min_delay_seconds: Minimum delay in seconds between processing samples to avoid rate limits.
+metadata_only: Boolean flag indicating whether to only generate metadata without downloading patches.
+combined_writer: csv.writer object for writing to the combined metadata CSV.
+split_writer: csv.writer object for writing to the split-specific metadata CSV.
+
+Returns:
+A dictionary containing counters for the number of samples processed, metadata successes/failures, and image
+download successes/failures, which can be used for logging and analysis of the export process.
+'''
 def export_split(
     rows,
     split_dir,
@@ -733,7 +1001,23 @@ def export_split(
 
     return counters
 
+'''
+--------------------------------
+ensure_output_dirs(output_root)
+--------------------------------
+Description:
+Ensures that the necessary output directories for the training, validation, and test splits 
+exist under the specified output root directory. The function constructs the paths for each 
+split directory, creates them if they do not already exist, and returns the Path object for
+each directory. This function is called at the beginning of the run function to set up the
+directory structure for saving downloaded patches and metadata files.
 
+Arguments:
+output_root: Path object representing the root directory under which the split directories should be created.
+
+Returns:
+A tuple containing Path objects for the training, validation, and test directories: (train_dir, valid_dir, test_dir).
+'''
 def ensure_output_dirs(output_root):
     train_dir = output_root / "Satellite_Training_Set"
     valid_dir = output_root / "Satellite_Validation_Set"
@@ -744,7 +1028,27 @@ def ensure_output_dirs(output_root):
 
     return train_dir, valid_dir, test_dir
 
+'''
+--------------------------------
+run()
+--------------------------------
+Description:
+The main execute function that orchestrates the entire process of loading samples, 
+splitting them into train/validation/test sets, initializing Earth Engine, building 
+the composite image, and exporting the patches and metadata for each split. The function
+sets up logging, parses and validates command-line arguments, ensures output directories exist,
+and manages the overall flow of data processing. It uses a requests.Session for efficient HTTP
+requests and maintains counters for tracking the number of samples processed, metadata successes/failures,
+and image download successes/failures, which it logs at the end of the process. The function
+also handles the opening and closing of metadata CSV files for writing, ensuring that all metadata
+is recorded properly for both the combined metadata file and the split-specific metadata files.
 
+Arguments:
+None; the function relies on command-line arguments for configuration.
+
+Returns:
+None; the function performs processing and logging but does not return a value.
+'''
 def run():
     setup_logging()
     args = parse_args()
@@ -878,6 +1182,6 @@ def run():
     logging.info("Combined metadata: %s", combined_metadata_path)
     logging.info("Per-split metadata: %s", split_metadata_paths)
 
-
+# Entry point for the script
 if __name__ == "__main__":
     run()
