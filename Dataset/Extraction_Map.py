@@ -671,6 +671,64 @@ def run():
 			refresh_seconds=args.session_refresh_seconds,
 		)
 
+		with open(combined_metadata_path, "w", newline="", encoding="utf-8") as combined_file, \
+			open(split_metadata_paths["train"], "w", newline="", encoding="utf-8") as train_meta_file, \
+			open(split_metadata_paths["valid"], "w", newline="", encoding="utf-8") as valid_meta_file, \
+			open(split_metadata_paths["test"], "w", newline="", encoding="utf-8") as test_meta_file:
+
+			combined_writer = csv.writer(combined_file)
+			train_writer = csv.writer(train_meta_file)
+			valid_writer = csv.writer(valid_meta_file)
+			test_writer = csv.writer(test_meta_file)
+
+			combined_writer.writerow(METADATA_COLUMNS)
+			train_writer.writerow(METADATA_COLUMNS)
+			valid_writer.writerow(METADATA_COLUMNS)
+			test_writer.writerow(METADATA_COLUMNS)
+
+			total = {
+				"samples": 0,
+				"tile_targets": 0,
+				"tile_ok": 0,
+				"tile_failed": 0,
+				"tile_skipped": 0,
+			}
+
+			split_tasks = [
+				(train_rows, train_dir, "train", train_writer),
+				(valid_rows, valid_dir, "valid", valid_writer),
+				(test_rows, test_dir, "test", test_writer),
+			]
+
+			for split_rows_data, split_dir, split_name, split_writer in split_tasks:
+				logging.info("Exporting split: %s", split_name)
+				stats = export_split(
+					split_rows_data,
+					split_dir,
+					split_name,
+					map_type=map_type,
+					zoom_levels=zoom_levels,
+					tile_client=tile_client,
+					min_delay_seconds=args.min_delay_seconds,
+					metadata_only=args.metadata_only,
+					skip_existing=args.skip_existing,
+					combined_writer=combined_writer,
+					split_writer=split_writer,
+				)
+
+				for key in total:
+					total[key] += stats[key]
+
+				logging.info(
+					"Split %s complete | samples=%s tile_targets=%s tile_ok=%s tile_failed=%s tile_skipped=%s",
+					split_name,
+					stats["samples"],
+					stats["tile_targets"],
+					stats["tile_ok"],
+					stats["tile_failed"],
+					stats["tile_skipped"],
+				)
+
 
 if __name__ == "__main__":
 	run()
