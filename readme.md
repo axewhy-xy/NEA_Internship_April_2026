@@ -1,15 +1,16 @@
 ### Project Title: Automated Feature Extraction and Quantification System in HDB Residential Buildings for Wolbachia Technology Optimisation
 Project Description: This study aims to identify HDB structures and estimate their impact on the wild-type mosquito population size and the efficacy of Wolbachia-Aedes releases.
 
-### Project Outcome: The outcome of the project would be a labelled dataset with structural and architectural features relevant to mosquito activity. The dataset is to be extracted using image processing and computer vision, validated for accuracy and cleaned for fitting causal machine learning model.
+### Project Outcome:
+The outcome of the project would be a labelled dataset with structural and architectural features relevant to mosquito activity. The dataset is to be extracted using image processing and computer vision, validated for accuracy and cleaned for fitting causal machine learning model.
 
 ## Planned Tasked/TODO:
 1. [X] - Set up environment for Google Earth Engine API for satellite imagery
 2. [X] - Write an algorithm/script using the GEE API to retrieve satellite imagery.
 3. [X] - Set up the environment for the Google Maps Street View API for close-up imagery/street view images of HDB buildings.
 4. [X] - Write an algorithm/script using the Google Maps Street View API to retrieve street views of HDB buildings.
-5. [ ] - Set up enviroment for Google Map Tile API to obtain a Satellite Tile of the chosen location
-6. [ ] - Write an alogrithm/script to extract Satellite Tile and retrieve the images of the chosen location.
+5. [X] - Set up enviroment for Google Map Tile API to obtain a Satellite Tile of the chosen location
+6. [X] - Write an alogrithm/script to extract Satellite Tile and retrieve the images of the chosen location.
 7. [ ] - Research and consider which causal machine learning model that can support object detection to train the dataset with 
          (preferably using transfer learning. For instance, freezing hidden layers and only training the last few layers + output layer).
 8. [ ] - Research and download the weights used to train the selected causal machine learning model in order to utilise transfer learning methodology. 
@@ -18,7 +19,7 @@ Project Description: This study aims to identify HDB structures and estimate the
 11. [ ] - Train the selected model with the collected dataset and tune hyperparameters to optimise the prediction accuracy.
 
 ## Problems Encountered: (Title: (date) [Complexity] [Status])
-1. Low satellite imagery resolution: (2026-04-13) [Moderate] [Unresolved]
+1. Low satellite imagery resolution: (2026-04-13) [Moderate] [Resolved]
 While using Google Earth Engine API (GEE), one main problem encountered was the resolution of the satellite image. The root cause is the bottlenecking of using a dataset from Sentinel-2 SR, which has a 10m resolution for RGB bands. While the output image captures enough context around the selected coordinates/postal code, it is rather difficult to get a clear image of the HDB roofings for dataset labelling.
 
 ## Mitigation/Solution:
@@ -27,4 +28,4 @@ There are 3 possible solutions/mitigations that can solve this issue. The first 
 
 ## Problem Resolution:
 1. Low satellite imagery resolution:
-TBD
+Retrieved images by using Google Map Tile API instead.
