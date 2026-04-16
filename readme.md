@@ -11,11 +11,10 @@ The outcome of the project would be a labelled dataset with structural and archi
 4. [X] - Write an algorithm/script using the Google Maps Street View API to retrieve street views of HDB buildings.
 5. [X] - Set up enviroment for Google Map Tile API to obtain a Satellite Tile of the chosen location
 6. [X] - Write an alogrithm/script to extract Satellite Tile and retrieve the images of the chosen location.
-7. [ ] - Research and consider which causal machine learning model that can support object detection to train the dataset with 
-         (preferably using transfer learning. For instance, freezing hidden layers and only training the last few layers + output layer).
-8. [ ] - Research and download the weights used to train the selected causal machine learning model in order to utilise transfer learning methodology. 
-9. [ ] - Research and consider image labelling tools to be used for the collected dataset to feed into the chosen causal machine learning model.
-10. [ ] - Label HDB features from the collected dataset. 
+7. [ ] - Research and consider image labelling tools to be used for the collected dataset to feed into the chosen causal machine learning model.
+8. [ ] - Label HDB features from the collected dataset. 
+9. [ ] - Research and consider which computer vision model is suitable for the project usage. 
+10. [ ] - Research and download the weights used to train the selected causal machine learning model in order to utilise transfer learning methodology. 
 11. [ ] - Train the selected model with the collected dataset and tune hyperparameters to optimise the prediction accuracy.
 
 ## Problems Encountered: (Title: (date) [Complexity] [Status])
