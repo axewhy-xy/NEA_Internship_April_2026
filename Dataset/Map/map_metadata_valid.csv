@@ -1,0 +1,4 @@
+id,lat,lon,postal_code,label,split,map_type,zoom,tile_x,tile_y,tile_width,tile_height,image_format,session_id,status,path,error
+3,1.33570859607444,103.692384325863,630991,Others,valid,satellite,20,826313,520397,256,256,jpeg,AJVsH2y8Qv0Yw5tWVXrSEG93yUAv3URZvCH0RdcSynOx-f3gAGBOjpNFqrZ-svYcwilkWVAp_7PS0BizHlzOkwEgUSvy,OK,Dataset\Map\Map_Validation_Set\3_valid_z20_x826313_y520397.jpg,
+17,1.34307733543561,103.692906024314,640837,Residential,valid,satellite,20,826315,520375,256,256,jpeg,AJVsH2y8Qv0Yw5tWVXrSEG93yUAv3URZvCH0RdcSynOx-f3gAGBOjpNFqrZ-svYcwilkWVAp_7PS0BizHlzOkwEgUSvy,OK,Dataset\Map\Map_Validation_Set\17_valid_z20_x826315_y520375.jpg,
+8,1.34744674941805,103.692827949719,640852,Residential,valid,satellite,20,826315,520362,256,256,jpeg,AJVsH2y8Qv0Yw5tWVXrSEG93yUAv3URZvCH0RdcSynOx-f3gAGBOjpNFqrZ-svYcwilkWVAp_7PS0BizHlzOkwEgUSvy,OK,Dataset\Map\Map_Validation_Set\8_valid_z20_x826315_y520362.jpg,
