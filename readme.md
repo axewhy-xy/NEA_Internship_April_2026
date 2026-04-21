@@ -11,7 +11,10 @@ The outcome of the project would be a labelled dataset with structural and archi
 4. [X] - Write an algorithm/script using the Google Maps Street View API to retrieve street views of HDB buildings.
 5. [X] - Set up enviroment for Google Map Tile API to obtain a Satellite Tile of the chosen location
 6. [X] - Write an alogrithm/script to extract Satellite Tile and retrieve the images of the chosen location.
-7. [ ] - Define what features are we extracting from the image? For instance, edges, image classification... (if doing from scratch or not using transfer learning)
+7. [ ] - Define what is the scope of 'feature extraction' in the context of this project, and determine the methodology for achieving the project outcome. This would     include discussing whether transfer learning can be utilised, and if so, which pre-trained models would be suitable for the task at hand. If transfer learning is not permitted, then there would be a need to discuss the specific features that need to be extracted from the images, and the methods for extracting those features from scratch.
+8. [ ] - Write an algorithm/script to augment the dataset using techniques such as rotation, flipping, scaling, etc. to increase the diversity of the dataset and improve the performance of the model.
+9a. [ ] - (if transfer learning is not permitted) Write an algorithm/script to extract the relevant features from the retrieved images using image processing techniques such as edge detection, corner detection, etc.
+9b. [ ] - (if transfer learning is permitted) Label the dataset with the relevant features for training a pre-trained model.
 
 
 ## Problems Encountered: (Title: (date) [Complexity] [Status])
@@ -36,9 +39,9 @@ Consulting the project supervisor is the only solution to this issue. There is a
 
 ## Problem Resolution:
 1. Low satellite imagery resolution:
-Retrieved images by using Google Map Tile API instead.
+Retrieved images by using Google Map Tile API instead. The image was retrieved using the satellite tile by calling the Google Map Tile API, which provided a much clearer image of the HDB roofings, allowing for better labelling of the dataset.
 
 2. Converting postal codes to latitude and longitude:
-Use the OneMap API to convert postal address codes into latitude and longitude. As the extraction of the dataset would only be done a couple of times, the computation time could be negligible. 
+Use the OneMap API to convert postal address codes into latitude and longitude coordinates. This allowed for a more efficient and automated way to retrieve the necessary coordinates for image extraction, streamlining the process and reducing the time and effort required for manual conversion. However, it is important to note that this solution would add more computation time to the extraction process, as each postal code would need to be converted before retrieving the corresponding image. This trade-off between automation and computation time would need to be considered when implementing this solution, especially if there is a large number of postal codes to process.
 
 3. Unclear project objective:
