@@ -21,7 +21,7 @@ While using Google Earth Engine API (GEE), one main problem encountered was the 
 2. Converting postal codes to latitude and longitude: (2026-04-14) [Low] [Resolved]
 The extraction script currently only takes in latitude and longtitude to get the image of the specific location. However, there is a need to figure out a method in order to convert postal address codes into the coordinate system, as most of the given data are in the form of postal code addresses.
 
-3. Unclear project objective: (2026-04-15) [High] [Unresolved]
+3. Unclear project objective: (2026-04-20) [High] [Unresolved]
 The project's purpose is unclear; there is a need to clarify the definition of feature extraction in the scope. Does 'feature extraction' mean HDB architectural features or does it mean the technical term 'feature extraction' in image processing? If it's the latter, then there will be a need to consult the methodology of achieving the project outcome. For instance, is it possible to utilise the concept of transfer learning using pre-existing models like ResNet-50 to aid with the feature extraction? If utilising transfer learning is permitted, then there is no need to work on extracting features like edge detection, corner detection, etc. from scratch. Instead, the task would then be updated to just dataset augmentation and labelling of the dataset to pass into the pre-trained model.
 
 ## Mitigation/Solution:
