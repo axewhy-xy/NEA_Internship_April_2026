@@ -348,6 +348,14 @@ def load_rows(metadata_csv: Path) -> List[Dict[str, str]]:
         raise ValueError("No valid training rows found in metadata.")
     return rows
 
+def stable_sample_seed(global_seed: int, source_path: str, aug_index: int) -> int:
+    key = f"{global_seed}|{source_path}|{aug_index}".encode("utf-8")
+    digest = hashlib.sha256(key).hexdigest()
+    return int(digest[:8], 16)
+
+def write_metadata_row(writer: csv.DictWriter, payload: Dict[str, object]) -> None:
+    writer.writerow({column: payload.get(column, "") for column in OUTPUT_COLUMNS})
+    
 def run():
     setup_logging()
     args = parse_arguments()
@@ -365,3 +373,45 @@ def run():
     rows = load_rows(input_metadata_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_image_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_mode = "w" if args.overwrite or not output_metadata_path.exists() else "a"
+    write_header = metadata_mode == "w"
+
+    logging.info("Loaded %d training rows from %s", len(rows), input_metadata_path)
+    logging.info("Enabled augmenters: %s", ", ".join(name for name, _ in augmenters))
+    logging.info("Writing augmented images to %s", output_image_dir)
+    logging.info("Writing metadata to %s", output_metadata_path)
+
+    total_ok = 0
+    total_failed = 0
+    total_skipped = 0
+
+    with open(output_metadata_path, mode=metadata_mode, newline="", encoding="utf-8") as csv_out:
+        writer = csv.DictWriter(csv_out, fieldnames=OUTPUT_COLUMNS)
+        if write_header:
+            writer.writeheader()
+
+        for idx, row in enumerate(rows, start=1):
+            source_path_text = row.get("path", "")
+            source_path = resolve_source_path(source_path_text)
+
+            if not source_path.exists():
+                logging.warning("Source image not found: %s", source_path)
+                for aug_idx in range(args.num_augs_per_image):
+                    sample_seed = stable_sample_seed(args.seed, source_path_text, aug_idx)
+                    write_metadata_row(
+                        writer,
+                        {
+                            "source_path": source_path_text,
+                            "augmented_path": "",
+                            "label": row.get("label", ""),
+                            "split": row.get("split", ""),
+                            "augmentation": "",
+                            "params_json": "{}",
+                            "seed": sample_seed,
+                            "status": "FAILED",
+                            "error": f"Source image not found: {source_path}",
+                        },
+                    )
+                    total_failed += 1
+                continue
