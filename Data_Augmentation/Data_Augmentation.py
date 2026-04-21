@@ -183,6 +183,154 @@ def resolve_source_path(path_text: str) -> Path:
 
     return (PROJECT_ROOT / raw_path).resolve()
 
+def rotate_image(image: Image.Image, angle: float) -> Image.Image:
+    return image.rotate(angle, resample=Image.BICUBIC, expand=True)
+
+def flip_image(image: Image.Image, mode: str) -> Image.Image:
+    if mode == "horizontal":
+        return ImageOps.mirror(image)
+    elif mode == "vertical":
+        return ImageOps.flip(image)
+    else:
+        raise ValueError(f"Invalid flip mode: {mode}")
+    
+def scale_image(image: Image.Image, factor: float) -> Image.Image:
+    width, height = image.size
+    new_width = int(width * factor)
+    new_height = int(height * factor)
+    return image.resize((new_width, new_height), resample=Image.BICUBIC)
+
+def translate_image(image: Image.Image, x_offset: int, y_offset: int) -> Image.Image:
+    return ImageChops.offset(image, x_offset, y_offset)
+
+def adjust_brightness(image: Image.Image, factor: float) -> Image.Image:
+    enhancer = ImageEnhance.Brightness(image)
+    return enhancer.enhance(factor)
+
+def adjust_contrast(image: Image.Image, factor: float) -> Image.Image:
+    enhancer = ImageEnhance.Contrast(image)
+    return enhancer.enhance(factor)
+
+def add_noise(image: Image.Image, mean: float, stddev: float, rng: random.Random) -> Image.Image:
+    if stddev < 0:
+        raise ValueError("Noise stddev must be >= 0")
+
+    mode = "L" if image.mode == "L" else "RGB"
+    noisy_base = image.convert(mode)
+    data = bytearray(noisy_base.tobytes())
+
+    for idx, pixel in enumerate(data):
+        noisy_value = int(round(pixel + rng.gauss(mean, stddev)))
+        data[idx] = max(0, min(255, noisy_value))
+
+    return Image.frombytes(mode, noisy_base.size, bytes(data))
+
+def random_crop(image: Image.Image, crop_size: Tuple[int, int], rng: random.Random) -> Image.Image:
+    width, height = image.size
+    crop_width, crop_height = crop_size
+    if crop_width > width or crop_height > height:
+        raise ValueError("Crop size must be smaller than the original image size.")
+    x_max = width - crop_width
+    y_max = height - crop_height
+    x_offset = rng.randint(0, x_max)
+    y_offset = rng.randint(0, y_max)
+    return image.crop((x_offset, y_offset, x_offset + crop_width, y_offset + crop_height))
+
+def random_erasing(image: Image.Image, erase_size: Tuple[int, int], erase_value: int, rng: random.Random) -> Image.Image:
+    width, height = image.size
+    erase_width, erase_height = erase_size
+    if erase_width > width or erase_height > height:
+        raise ValueError("Erase size must be smaller than the original image size.")
+    x_max = width - erase_width
+    y_max = height - erase_height
+    x_offset = rng.randint(0, x_max)
+    y_offset = rng.randint(0, y_max)
+    erased_image = image.copy()
+    draw = ImageDraw.Draw(erased_image)
+    draw.rectangle([x_offset, y_offset, x_offset + erase_width, y_offset + erase_height], fill=erase_value)
+    return erased_image
+
+
+AugmenterFn = Callable[[Image.Image, random.Random], Tuple[Image.Image, Dict[str, object]]]
+
+def build_augmenters(args) -> List[Tuple[str, AugmenterFn]]:
+    translation_pairs = [(int(x), int(y)) for x, y in pairwise(args.translation_offsets)]
+    noise_pairs = pairwise(args.noise_params)
+
+    use_specific_flags = any(
+        [
+            args.use_rotation,
+            args.use_flip,
+            args.use_scale,
+            args.use_translation,
+            args.use_brightness,
+            args.use_contrast,
+            args.use_noise,
+            args.use_crop,
+            args.use_erase,
+        ]
+    )
+
+    use_all = args.use_all_augs or not use_specific_flags
+    augmenters: List[Tuple[str, AugmenterFn]] = []
+
+    if use_all or args.use_rotation:
+        def rotate_aug(image: Image.Image, rng: random.Random) -> Tuple[Image.Image, Dict[str, object]]:
+            angle = rng.choice(args.rotation_angles)
+            return rotate_image(image, angle), {"angle": angle}
+        augmenters.append(("rotation", rotate_aug))
+
+    if use_all or args.use_flip:
+        def flip_aug(image: Image.Image, rng: random.Random) -> Tuple[Image.Image, Dict[str, object]]:
+            mode = rng.choice(args.flip_modes)
+            return flip_image(image, mode), {"mode": mode}
+        augmenters.append(("flip", flip_aug))
+
+    if use_all or args.use_scale:
+        def scale_aug(image: Image.Image, rng: random.Random) -> Tuple[Image.Image, Dict[str, object]]:
+            factor = rng.choice(args.scale_factors)
+            return scale_image(image, factor), {"factor": factor}
+        augmenters.append(("scale", scale_aug))
+
+    if use_all or args.use_translation:
+        def translation_aug(image: Image.Image, rng: random.Random) -> Tuple[Image.Image, Dict[str, object]]:
+            x_offset, y_offset = rng.choice(translation_pairs)
+            return translate_image(image, x_offset, y_offset), {"x_offset": x_offset, "y_offset": y_offset}
+        augmenters.append(("translation", translation_aug))
+
+    if use_all or args.use_brightness:
+        def brightness_aug(image: Image.Image, rng: random.Random) -> Tuple[Image.Image, Dict[str, object]]:
+            factor = rng.choice(args.brightness_factors)
+            return adjust_brightness(image, factor), {"factor": factor}
+        augmenters.append(("brightness", brightness_aug))
+
+    if use_all or args.use_contrast:
+        def contrast_aug(image: Image.Image, rng: random.Random) -> Tuple[Image.Image, Dict[str, object]]:
+            factor = rng.choice(args.contrast_factors)
+            return adjust_contrast(image, factor), {"factor": factor}
+        augmenters.append(("contrast", contrast_aug))
+
+    if use_all or args.use_noise:
+        def noise_aug(image: Image.Image, rng: random.Random) -> Tuple[Image.Image, Dict[str, object]]:
+            mean, stddev = rng.choice(noise_pairs)
+            return add_noise(image, mean, stddev, rng), {"mean": mean, "stddev": stddev}
+        augmenters.append(("noise", noise_aug))
+
+    if use_all or args.use_crop:
+        def crop_aug(image: Image.Image, rng: random.Random) -> Tuple[Image.Image, Dict[str, object]]:
+            return random_crop(image, tuple(args.crop_size), rng), {"crop_size": list(args.crop_size)}
+        augmenters.append(("crop", crop_aug))
+
+    if use_all or args.use_erase:
+        def erase_aug(image: Image.Image, rng: random.Random) -> Tuple[Image.Image, Dict[str, object]]:
+            return random_erasing(image, tuple(args.erase_size), args.erase_value, rng), {
+                "erase_size": list(args.erase_size),
+                "erase_value": args.erase_value,
+            }
+        augmenters.append(("erase", erase_aug))
+
+    return augmenters
+
 def run():
     setup_logging()
     args = parse_arguments()
@@ -193,3 +341,6 @@ def run():
     output_metadata_path = output_dir / args.output_metadata
 
     validate_args(args, input_metadata_path)
+    augmenters = build_augmenters(args)
+    if not augmenters:
+        raise ValueError("No augmenters available. Enable at least one augmentation flag.")
