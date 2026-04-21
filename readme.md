@@ -12,8 +12,10 @@ The outcome of the project would be a labelled dataset with structural and archi
 5. [X] - Set up enviroment for Google Map Tile API to obtain a Satellite Tile of the chosen location
 6. [X] - Write an alogrithm/script to extract Satellite Tile and retrieve the images of the chosen location.
 7. [X] - Define what is the scope of 'feature extraction' in the context of this project, and determine the methodology for achieving the project outcome. This would     include discussing whether transfer learning can be utilised, and if so, which pre-trained models would be suitable for the task at hand. If transfer learning is not permitted, then there would be a need to discuss the specific features that need to be extracted from the images, and the methods for extracting those features from scratch.
-8. [ ] - Write an algorithm/script to augment the dataset using techniques such as rotation, flipping, scaling, etc. to increase the diversity of the dataset and improve the performance of the model.
+8. [X] - Write an algorithm/script to augment the dataset using techniques such as rotation, flipping, scaling, etc. to increase the diversity of the dataset and improve the performance of the model.
 9. [ ] - (if transfer learning is permitted) Label the dataset with the relevant features for training a pre-trained model.
+10. [ ] - Download and set up the pre-trained model locally (e.g., ResNet-50) for feature extraction.
+11. [ ] - Train the pre-trained model on the labelled dataset to extract the relevant features from the images.
 
 ## Deprecated Tasks:
 1.  Write an algorithm/script to extract the relevant features from the retrieved images using image processing techniques such as edge detection, corner detection, etc.
