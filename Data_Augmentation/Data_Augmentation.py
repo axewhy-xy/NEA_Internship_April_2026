@@ -168,3 +168,28 @@ def resolve_path(path_text: str, root: Path) -> Path:
         return cwd_candidate
 
     return (root / raw_path).resolve()
+
+def pairwise(values: List[float]) -> List[Tuple[float, float]]:
+    return [(values[i], values[i + 1]) for i in range(0, len(values), 2)]
+
+def resolve_source_path(path_text: str) -> Path:
+    raw_path = normalize_path(path_text)
+    if raw_path.is_absolute():
+        return raw_path
+
+    cwd_candidate = (Path.cwd() / raw_path).resolve()
+    if cwd_candidate.exists():
+        return cwd_candidate
+
+    return (PROJECT_ROOT / raw_path).resolve()
+
+def run():
+    setup_logging()
+    args = parse_arguments()
+
+    input_metadata_path = resolve_path(args.input_dir, PROJECT_ROOT)
+    output_dir = resolve_path(args.output_dir, PROJECT_ROOT)
+    output_image_dir = output_dir / "images"
+    output_metadata_path = output_dir / args.output_metadata
+
+    validate_args(args, input_metadata_path)
