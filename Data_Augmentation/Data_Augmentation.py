@@ -169,8 +169,30 @@ def resolve_path(path_text: str, root: Path) -> Path:
 
     return (root / raw_path).resolve()
 
+def stable_sample_seed(global_seed: int, source_path: str, aug_index: int) -> int:
+    key = f"{global_seed}|{source_path}|{aug_index}".encode("utf-8")
+    digest = hashlib.sha256(key).hexdigest()
+    return int(digest[:8], 16)
+
 def pairwise(values: List[float]) -> List[Tuple[float, float]]:
     return [(values[i], values[i + 1]) for i in range(0, len(values), 2)]
+
+def load_rows(metadata_csv: Path) -> List[Dict[str, str]]:
+    rows = []
+    with open(metadata_csv, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Keep train-only for v1 to avoid leakage.
+            if row.get("split", "").strip().lower() != "train":
+                continue
+            if row.get("status", "").strip().upper() != "OK":
+                continue
+            if not row.get("path"):
+                continue
+            rows.append(row)
+    if not rows:
+        raise ValueError("No valid training rows found in metadata.")
+    return rows
 
 def resolve_source_path(path_text: str) -> Path:
     raw_path = normalize_path(path_text)
@@ -249,7 +271,6 @@ def random_erasing(image: Image.Image, erase_size: Tuple[int, int], erase_value:
     draw = ImageDraw.Draw(erased_image)
     draw.rectangle([x_offset, y_offset, x_offset + erase_width, y_offset + erase_height], fill=erase_value)
     return erased_image
-
 
 AugmenterFn = Callable[[Image.Image, random.Random], Tuple[Image.Image, Dict[str, object]]]
 
@@ -331,31 +352,96 @@ def build_augmenters(args) -> List[Tuple[str, AugmenterFn]]:
 
     return augmenters
 
-def load_rows(metadata_csv: Path) -> List[Dict[str, str]]:
-    rows = []
-    with open(metadata_csv, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            # Keep train-only to avoid leakage.
-            if row.get("split", "").strip().lower() != "train":
-                continue
-            if row.get("status", "").strip().lower() != "ok":
-                continue
-            if not row.get("path"):
-                continue
-            rows.append(row)
-    if not rows:
-        raise ValueError("No valid training rows found in metadata.")
-    return rows
-
-def stable_sample_seed(global_seed: int, source_path: str, aug_index: int) -> int:
-    key = f"{global_seed}|{source_path}|{aug_index}".encode("utf-8")
-    digest = hashlib.sha256(key).hexdigest()
-    return int(digest[:8], 16)
+def save_augmented_image(image: Image.Image, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image_to_save = image.convert("RGB") if image.mode != "RGB" else image
+    image_to_save.save(output_path, format="JPEG", quality=95)
 
 def write_metadata_row(writer: csv.DictWriter, payload: Dict[str, object]) -> None:
     writer.writerow({column: payload.get(column, "") for column in OUTPUT_COLUMNS})
-    
+
+def augment_single_image(
+    source_image: Image.Image,
+    source_path_text: str,
+    label: str,
+    split: str,
+    augmenters: List[Tuple[str, AugmenterFn]],
+    num_augs_per_image: int,
+    output_image_dir: Path,
+    global_seed: int,
+    writer: csv.DictWriter,
+    overwrite: bool,
+) -> Tuple[int, int, int]:
+    success_count = 0
+    fail_count = 0
+    skip_count = 0
+
+    source_stem = normalize_path(source_path_text).stem
+
+    for aug_idx in range(num_augs_per_image):
+        sample_seed = stable_sample_seed(global_seed, source_path_text, aug_idx)
+        rng = random.Random(sample_seed)
+
+        aug_name, aug_fn = rng.choice(augmenters)
+        output_name = f"{source_stem}__aug{aug_idx:03d}__{aug_name}__s{sample_seed:08x}.jpg"
+        output_path = output_image_dir / output_name
+
+        if output_path.exists() and not overwrite:
+            write_metadata_row(
+                writer,
+                {
+                    "source_path": source_path_text,
+                    "augmented_path": output_path.as_posix(),
+                    "label": label,
+                    "split": split,
+                    "augmentation": aug_name,
+                    "params_json": "{}",
+                    "seed": sample_seed,
+                    "status": "SKIPPED",
+                    "error": "file exists and overwrite is disabled",
+                },
+            )
+            skip_count += 1
+            continue
+
+        try:
+            augmented_image, params = aug_fn(source_image.copy(), rng)
+            save_augmented_image(augmented_image, output_path)
+
+            write_metadata_row(
+                writer,
+                {
+                    "source_path": source_path_text,
+                    "augmented_path": output_path.as_posix(),
+                    "label": label,
+                    "split": split,
+                    "augmentation": aug_name,
+                    "params_json": json.dumps(params, ensure_ascii=True),
+                    "seed": sample_seed,
+                    "status": "OK",
+                    "error": "",
+                },
+            )
+            success_count += 1
+        except Exception as exc:
+            write_metadata_row(
+                writer,
+                {
+                    "source_path": source_path_text,
+                    "augmented_path": "",
+                    "label": label,
+                    "split": split,
+                    "augmentation": aug_name,
+                    "params_json": "{}",
+                    "seed": sample_seed,
+                    "status": "FAILED",
+                    "error": str(exc),
+                },
+            )
+            fail_count += 1
+
+    return success_count, fail_count, skip_count
+
 def run():
     setup_logging()
     args = parse_arguments()
@@ -369,7 +455,7 @@ def run():
     augmenters = build_augmenters(args)
     if not augmenters:
         raise ValueError("No augmenters available. Enable at least one augmentation flag.")
-    
+
     rows = load_rows(input_metadata_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_image_dir.mkdir(parents=True, exist_ok=True)
@@ -415,3 +501,56 @@ def run():
                     )
                     total_failed += 1
                 continue
+
+            try:
+                with Image.open(source_path) as source_image_handle:
+                    source_image = ImageOps.exif_transpose(source_image_handle).convert("RGB")
+
+                ok_count, fail_count, skip_count = augment_single_image(
+                    source_image=source_image,
+                    source_path_text=source_path_text,
+                    label=row.get("label", ""),
+                    split=row.get("split", ""),
+                    augmenters=augmenters,
+                    num_augs_per_image=args.num_augs_per_image,
+                    output_image_dir=output_image_dir,
+                    global_seed=args.seed,
+                    writer=writer,
+                    overwrite=args.overwrite,
+                )
+
+                total_ok += ok_count
+                total_failed += fail_count
+                total_skipped += skip_count
+            except Exception as exc:
+                logging.exception("Unexpected failure on source image %s", source_path)
+                for aug_idx in range(args.num_augs_per_image):
+                    sample_seed = stable_sample_seed(args.seed, source_path_text, aug_idx)
+                    write_metadata_row(
+                        writer,
+                        {
+                            "source_path": source_path_text,
+                            "augmented_path": "",
+                            "label": row.get("label", ""),
+                            "split": row.get("split", ""),
+                            "augmentation": "",
+                            "params_json": "{}",
+                            "seed": sample_seed,
+                            "status": "FAILED",
+                            "error": str(exc),
+                        },
+                    )
+                    total_failed += 1
+
+            if idx % 100 == 0:
+                logging.info("Processed %d/%d source rows", idx, len(rows))
+
+    logging.info(
+        "Augmentation complete. Success=%d Failed=%d Skipped=%d",
+        total_ok,
+        total_failed,
+        total_skipped,
+    )
+
+if __name__ == "__main__":
+    run()
