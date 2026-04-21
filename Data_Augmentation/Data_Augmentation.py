@@ -331,6 +331,23 @@ def build_augmenters(args) -> List[Tuple[str, AugmenterFn]]:
 
     return augmenters
 
+def load_rows(metadata_csv: Path) -> List[Dict[str, str]]:
+    rows = []
+    with open(metadata_csv, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Keep train-only to avoid leakage.
+            if row.get("split", "").strip().lower() != "train":
+                continue
+            if row.get("status", "").strip().lower() != "ok":
+                continue
+            if not row.get("path"):
+                continue
+            rows.append(row)
+    if not rows:
+        raise ValueError("No valid training rows found in metadata.")
+    return rows
+
 def run():
     setup_logging()
     args = parse_arguments()
@@ -344,3 +361,7 @@ def run():
     augmenters = build_augmenters(args)
     if not augmenters:
         raise ValueError("No augmenters available. Enable at least one augmentation flag.")
+    
+    rows = load_rows(input_metadata_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_image_dir.mkdir(parents=True, exist_ok=True)
