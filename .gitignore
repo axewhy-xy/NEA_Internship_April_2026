@@ -34,3 +34,11 @@ logs
 *.bmp
 *.svg
 *.ico
+
+#Database files
+*.db
+*.sql
+*.sqlite
+*.sqlite3
+*.json
+*.csv
