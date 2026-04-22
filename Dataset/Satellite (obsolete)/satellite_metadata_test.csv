@@ -1,4 +1,0 @@
-id,lat,lon,postal_code,label,split,path,status,error,collection_id,start_date,end_date,max_cloud,scale_m,patch_size_m,crs
-9,1.33604657171774,103.692759654591,630992,Others,test,Dataset\Satellite\Satellite_Test_Set\9_test.tif,OK,,COPERNICUS/S2_SR_HARMONIZED,2024-01-01,2024-12-31,20,10,320,EPSG:4326
-1,1.3465916671122,103.692474184137,640851,Residential,test,Dataset\Satellite\Satellite_Test_Set\1_test.tif,OK,,COPERNICUS/S2_SR_HARMONIZED,2024-01-01,2024-12-31,20,10,320,EPSG:4326
-4,1.34493825499181,103.692382237035,640844,Residential,test,Dataset\Satellite\Satellite_Test_Set\4_test.tif,OK,,COPERNICUS/S2_SR_HARMONIZED,2024-01-01,2024-12-31,20,10,320,EPSG:4326
