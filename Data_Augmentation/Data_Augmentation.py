@@ -45,7 +45,7 @@ from PIL import Image, ImageEnhance, ImageOps, ImageChops, ImageDraw
 # ----------------------------------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-DEFAULT_INPUT_METADATA                                      = "Dataset/Street/street_metadata_train.csv"
+DEFAULT_INPUT_METADATA                                      = "Dataset/Street/street_metadata.csv"
 DEFAULT_OUTPUT_DIR                                          = "Data_Augmentation/Result"
 DEFAULT_OUTPUT_METADATA                                     = "augmented_metadata.csv"
 DEFAULT_SEED                                                = 2026
@@ -340,10 +340,9 @@ def pairwise(values: List[float]) -> List[Tuple[float, float]]:
 Description:
 This function loads and filters rows from the input metadata CSV file. It reads the CSV file using a 
 DictReader and iterates through each row, applying filters to keep only those rows that are marked as
-"train" in the "split" column, have a status of "OK" in the "status" column, and contain a non-empty
-"path" column. The function collects the valid rows in a list and returns it. If no valid training rows
-are found, the function raises a ValueError indicating that no valid training rows were found in the 
-metadata.
+"OK" in the "status" column, and contain a non-empty "path" column. The function collects the valid 
+rows in a list and returns it. If no valid rows are found, the function raises a ValueError indicating 
+that no valid rows were found in the metadata.
 
 Arguments:
 - metadata_csv: A Path object representing the path to the input metadata CSV file.
@@ -353,23 +352,20 @@ Returns:
   meets the specified filtering criteria.
 
 Raises:
-- ValueError: If no valid training rows are found in the metadata CSV file.
+- ValueError: If no valid rows are found in the metadata CSV file.
 '''
 def load_rows(metadata_csv: Path) -> List[Dict[str, str]]:
     rows = []
     with open(metadata_csv, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Keep train-only for v1 to avoid leakage.
-            if row.get("split", "").strip().lower() != "train":
-                continue
             if row.get("status", "").strip().upper() != "OK":
                 continue
             if not row.get("path"):
                 continue
             rows.append(row)
     if not rows:
-        raise ValueError("No valid training rows found in metadata.")
+        raise ValueError("No valid rows found in metadata.")
     return rows
 
 '''
@@ -968,6 +964,62 @@ def augment_single_image(
 
 '''
 # ----------------------------------------------------------------------------------------------------
+# ensure_output_dirs()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function ensures that the output directories for the augmented images and metadata exist. It takes
+a Path object representing the base output directory and creates subdirectories for "train", "valid", and
+"test" splits if they do not already exist. The function returns a tuple containing the Path objects for
+the train, valid, and test directories, which can be used for saving the augmented images and metadata
+corresponding to each data split.
+'''
+def ensure_output_dirs(output_dir):
+    train_dir = output_dir / "train"
+    valid_dir = output_dir / "valid"
+    test_dir = output_dir / "test"
+
+    for directory in (train_dir, valid_dir, test_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    return train_dir, valid_dir, test_dir
+
+
+'''
+# ----------------------------------------------------------------------------------------------------
+# resolve_split_output_dir()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function resolves the output directory for an augmented image based on the input row split value.
+It supports common aliases (such as "val" and "validation" mapping to "valid") and falls back to
+an unknown split directory when the split value is missing or unrecognized.
+
+Arguments:
+- split_value: A string representing the dataset split from input metadata.
+- split_dirs: A dictionary mapping canonical split names (train/valid/test) to output directories.
+- unknown_dir: A Path object for storing rows with missing or unrecognized split values.
+
+Returns:
+- A Path object representing where the augmented image should be written.
+'''
+def resolve_split_output_dir(split_value: str, split_dirs: Dict[str, Path], unknown_dir: Path) -> Path:
+    split_key = split_value.strip().lower()
+    split_aliases = {
+        "train": "train",
+        "training": "train",
+        "valid": "valid",
+        "val": "valid",
+        "validation": "valid",
+        "test": "test",
+        "testing": "test",
+    }
+
+    normalized_split = split_aliases.get(split_key)
+    if normalized_split:
+        return split_dirs[normalized_split]
+    return unknown_dir
+
+'''
+# ----------------------------------------------------------------------------------------------------
 # run()
 # ----------------------------------------------------------------------------------------------------
 Description:
@@ -995,6 +1047,11 @@ def run():
     output_dir = resolve_path(args.output_dir, PROJECT_ROOT)
     output_image_dir = output_dir / "images"
     output_metadata_path = output_dir / args.output_metadata
+    train_dir, valid_dir, test_dir = ensure_output_dirs(output_image_dir)
+    split_dirs = {"train": train_dir, "valid": valid_dir, "test": test_dir}
+
+    unknown_split_dir = output_image_dir / "unknown"
+    unknown_split_dir.mkdir(parents=True, exist_ok=True)
 
     validate_args(args, input_metadata_path)
     augmenters = build_augmenters(args)
@@ -1008,7 +1065,7 @@ def run():
     metadata_mode = "w" if args.overwrite or not output_metadata_path.exists() else "a"
     write_header = metadata_mode == "w"
 
-    logging.info("Loaded %d training rows from %s", len(rows), input_metadata_path)
+    logging.info("Loaded %d rows from %s", len(rows), input_metadata_path)
     logging.info("Enabled augmenters: %s", ", ".join(name for name, _ in augmenters))
     logging.info("Writing augmented images to %s", output_image_dir)
     logging.info("Writing metadata to %s", output_metadata_path)
@@ -1016,6 +1073,7 @@ def run():
     total_ok = 0
     total_failed = 0
     total_skipped = 0
+    warned_unknown_splits = set()
 
     with open(output_metadata_path, mode=metadata_mode, newline="", encoding="utf-8") as csv_out:
         writer = csv.DictWriter(csv_out, fieldnames=OUTPUT_COLUMNS)
@@ -1025,6 +1083,17 @@ def run():
         for idx, row in enumerate(rows, start=1):
             source_path_text = row.get("path", "")
             source_path = resolve_source_path(source_path_text)
+            split_value = row.get("split", "")
+            split_output_dir = resolve_split_output_dir(split_value, split_dirs, unknown_split_dir)
+
+            split_key = split_value.strip().lower()
+            if split_output_dir == unknown_split_dir and split_key not in warned_unknown_splits:
+                logging.warning(
+                    "Unrecognized split '%s'. Writing augmented images to %s",
+                    split_value,
+                    unknown_split_dir,
+                )
+                warned_unknown_splits.add(split_key)
 
             if not source_path.exists():
                 logging.warning("Source image not found: %s", source_path)
@@ -1055,10 +1124,10 @@ def run():
                     source_image=source_image,
                     source_path_text=source_path_text,
                     label=row.get("label", ""),
-                    split=row.get("split", ""),
+                    split=split_value,
                     augmenters=augmenters,
                     num_augs_per_image=args.num_augs_per_image,
-                    output_image_dir=output_image_dir,
+                    output_image_dir=split_output_dir,
                     global_seed=args.seed,
                     writer=writer,
                     overwrite=args.overwrite,
