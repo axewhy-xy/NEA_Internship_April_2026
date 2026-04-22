@@ -338,21 +338,21 @@ def pairwise(values: List[float]) -> List[Tuple[float, float]]:
 # load_rows()
 # ----------------------------------------------------------------------------------------------------
 Description:
-This function loads and filters rows from the input metadata CSV file. It reads the CSV file using a 
-DictReader and iterates through each row, applying filters to keep only those rows that are marked as
-"OK" in the "status" column, and contain a non-empty "path" column. The function collects the valid 
-rows in a list and returns it. If no valid rows are found, the function raises a ValueError indicating 
-that no valid rows were found in the metadata.
+This function loads and filter rows from the input metadata CSV file. It reads the CSV file using the 
+csv.DictReader and iterates through each row, checking for the presence of a "status" field with a value
+of "OK" and a non-empty "path" field. Only rows that meet these criteria are added to the list of valid rows.
+If no valid rows are found after processing the entire CSV file, the function raises a ValueError indicating
+that no valid rows were found in the metadata. The function returns a list of dictionaries, where each dictionary
+represents a valid row from the metadata CSV file, containing the relevant information for data augmentation.
 
 Arguments:
 - metadata_csv: A Path object representing the path to the input metadata CSV file.
 
 Returns:
-- A list of dictionaries, where each dictionary represents a valid row from the metadata CSV file that
-  meets the specified filtering criteria.
+- A list of dictionaries, where each dictionary represents a valid row from the metadata CSV file.
 
 Raises:
-- ValueError: If no valid rows are found in the metadata CSV file.
+- ValueError: If no valid rows are found in the metadata CSV file after processing.
 '''
 def load_rows(metadata_csv: Path) -> List[Dict[str, str]]:
     rows = []
@@ -1052,6 +1052,9 @@ def run():
 
     unknown_split_dir = output_image_dir / "unknown"
     unknown_split_dir.mkdir(parents=True, exist_ok=True)
+
+    logging.info("Input metadata path: %s", input_metadata_path)
+    logging.info("Output directory: %s", output_dir)
 
     validate_args(args, input_metadata_path)
     augmenters = build_augmenters(args)
