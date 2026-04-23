@@ -85,6 +85,7 @@ MAP_FILENAME_PATTERN = re.compile(
 	re.IGNORECASE,
 )
 
+
 @dataclass(frozen=True)
 class DatasetConfig:
 	name: str
@@ -129,6 +130,7 @@ DATASET_CONFIGS = {
 		columns=MAP_COLUMNS,
 	),
 }
+
 
 def parse_args():
 	parser = argparse.ArgumentParser(
@@ -175,14 +177,17 @@ def setup_logging(log_level):
 		datefmt="%Y-%m-%d %H:%M:%S",
 	)
 
+
 def string_value(value):
 	if value is None:
 		return ""
 	return str(value).strip()
 
+
 def normalize_split(value):
 	text = string_value(value).lower()
 	return text if text in SPLITS else ""
+
 
 def normalize_int_text(value):
 	text = string_value(value)
@@ -192,6 +197,7 @@ def normalize_int_text(value):
 		return str(int(float(text)))
 	except ValueError:
 		return text
+
 
 def numeric_sort_key(value):
 	text = string_value(value)
@@ -205,8 +211,10 @@ def numeric_sort_key(value):
 		except ValueError:
 			return (1, 0, text)
 
+
 def row_score(row, columns):
 	return sum(1 for column in columns if string_value(row.get(column)))
+
 
 def make_backup(csv_path):
 	if not csv_path.exists():
@@ -216,6 +224,7 @@ def make_backup(csv_path):
 	backup_path = csv_path.parent / f"{csv_path.name}.bak_{timestamp}"
 	shutil.copy2(csv_path, backup_path)
 	return backup_path
+
 
 def read_csv_rows(csv_path):
 	if not csv_path.exists():
@@ -228,6 +237,29 @@ def read_csv_rows(csv_path):
 			logging.warning("CSV has no header, treating as empty: %s", csv_path)
 			return []
 		return list(reader)
+
+
+def normalize_row(row, columns):
+	normalized = {column: "" for column in columns}
+	for column in columns:
+		normalized[column] = string_value(row.get(column, ""))
+	return normalized
+
+
+def write_csv_rows(csv_path, columns, rows, backup_enabled, backups):
+	csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+	if backup_enabled:
+		backup_path = make_backup(csv_path)
+		if backup_path is not None:
+			backups.append(str(backup_path))
+
+	with open(csv_path, "w", newline="", encoding="utf-8") as handle:
+		writer = csv.DictWriter(handle, fieldnames=list(columns))
+		writer.writeheader()
+		for row in rows:
+			writer.writerow({column: row.get(column, "") for column in columns})
+
 
 def parse_street_filename(file_name):
 	match = STREET_FILENAME_PATTERN.fullmatch(file_name)
@@ -244,6 +276,7 @@ def parse_street_filename(file_name):
 		"ext": string_value(groups["ext"]).lower(),
 	}
 
+
 def parse_map_filename(file_name):
 	match = MAP_FILENAME_PATTERN.fullmatch(file_name)
 	if not match:
@@ -259,12 +292,14 @@ def parse_map_filename(file_name):
 		"ext": string_value(groups["ext"]).lower(),
 	}
 
+
 def parse_filename(dataset_name, file_name):
 	if dataset_name == "street":
 		return parse_street_filename(file_name)
 	if dataset_name == "map":
 		return parse_map_filename(file_name)
 	return None
+
 
 def build_key_from_parts(dataset_name, parts):
 	split_name = normalize_split(parts.get("split", ""))
@@ -287,6 +322,7 @@ def build_key_from_parts(dataset_name, parts):
 	if not zoom or not tile_x or not tile_y:
 		return None
 	return (sample_id, split_name, zoom, tile_x, tile_y)
+
 
 def build_key_from_row(dataset_name, row):
 	parts = {
@@ -324,10 +360,19 @@ def build_key_from_row(dataset_name, row):
 
 	return build_key_from_parts(dataset_name, parsed)
 
+
+def image_format_from_extension(extension):
+	ext = string_value(extension).lower().lstrip(".")
+	if ext == "jpg":
+		return "jpeg"
+	return ext
+
+
 def build_metadata_path(config, split_name, file_name):
 	split_dir_name = Path(config.split_dirs[split_name]).name
 	win_path = PureWindowsPath(config.path_prefix) / split_dir_name / file_name
 	return str(win_path)
+
 
 def scan_split_files(config, base_dir):
 	files_by_key = {}
@@ -390,11 +435,6 @@ def scan_split_files(config, base_dir):
 		"duplicate_keys": duplicate_keys,
 	}
 
-def normalize_row(row, columns):
-	normalized = {column: "" for column in columns}
-	for column in columns:
-		normalized[column] = string_value(row.get(column, ""))
-	return normalized
 
 def select_best_row(current_row, candidate_row, columns):
 	if current_row is None:
@@ -428,6 +468,7 @@ def build_context_by_key(config, existing_rows):
 
 	return context_by_key, invalid_file_rows
 
+
 def build_id_context(config, existing_rows):
 	context_by_id = {}
 
@@ -444,6 +485,88 @@ def build_id_context(config, existing_rows):
 		)
 
 	return context_by_id
+
+
+def dedupe_rows(rows, columns):
+	seen = set()
+	unique_rows = []
+
+	for row in rows:
+		signature = tuple(string_value(row.get(column, "")) for column in columns)
+		if signature in seen:
+			continue
+		seen.add(signature)
+		unique_rows.append(row)
+
+	return unique_rows
+
+
+def build_row_for_file(config, file_info, key_row, id_row):
+	parts = file_info["parts"]
+	row = {column: "" for column in config.columns}
+
+	for source in (id_row, key_row):
+		if source is None:
+			continue
+		for column in config.columns:
+			value = string_value(source.get(column, ""))
+			if value:
+				row[column] = value
+
+	row["id"] = string_value(parts["id"])
+	row["split"] = normalize_split(parts["split"])
+	row["path"] = string_value(file_info["metadata_path"])
+	row["status"] = "OK"
+	row["error"] = ""
+
+	if config.name == "street":
+		row["heading"] = normalize_int_text(parts["heading"])
+		row["pitch"] = normalize_int_text(parts["pitch"])
+		row["fov"] = normalize_int_text(parts["fov"])
+		if not row["size"]:
+			row["size"] = "640x640"
+	else:
+		row["zoom"] = normalize_int_text(parts["zoom"])
+		row["tile_x"] = normalize_int_text(parts["tile_x"])
+		row["tile_y"] = normalize_int_text(parts["tile_y"])
+		row["image_format"] = image_format_from_extension(parts["ext"])
+		if not row["map_type"]:
+			row["map_type"] = "satellite"
+		if not row["tile_width"]:
+			row["tile_width"] = "256"
+		if not row["tile_height"]:
+			row["tile_height"] = "256"
+
+	return row
+
+
+def sort_rows(config, rows):
+	def _sort_key(row):
+		split_key = SPLIT_ORDER.get(normalize_split(row.get("split", "")), 99)
+		base = [split_key, numeric_sort_key(row.get("id", ""))]
+
+		if config.name == "street":
+			base.extend(
+				[
+					numeric_sort_key(row.get("heading", "")),
+					numeric_sort_key(row.get("pitch", "")),
+					numeric_sort_key(row.get("fov", "")),
+				]
+			)
+		else:
+			base.extend(
+				[
+					numeric_sort_key(row.get("zoom", "")),
+					numeric_sort_key(row.get("tile_x", "")),
+					numeric_sort_key(row.get("tile_y", "")),
+				]
+			)
+
+		base.append(string_value(row.get("path", "")))
+		return tuple(base)
+
+	return sorted(rows, key=_sort_key)
+
 
 def reconcile_dataset(config, base_dir, dry_run, keep_nonfile_rows, backup_enabled):
 	combined_path = base_dir / Path(config.combined_metadata)
@@ -551,6 +674,7 @@ def reconcile_dataset(config, base_dir, dry_run, keep_nonfile_rows, backup_enabl
 		"backups": backups,
 	}
 
+
 def log_dataset_summary(summary):
 	logging.info("Dataset: %s", summary["dataset"])
 	logging.info("Dry run: %s", summary["dry_run"])
@@ -581,6 +705,7 @@ def log_dataset_summary(summary):
 	if summary["backups"]:
 		logging.info("Backup files created: %s", len(summary["backups"]))
 
+
 def run():
 	args = parse_args()
 	setup_logging(args.log_level)
@@ -610,6 +735,8 @@ def run():
 
 	logging.info("Metadata reconciliation complete.")
 
+
 if __name__ == "__main__":
 	run()
+
 	
