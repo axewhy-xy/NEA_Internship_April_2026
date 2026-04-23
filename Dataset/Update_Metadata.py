@@ -175,6 +175,48 @@ def setup_logging(log_level):
 		datefmt="%Y-%m-%d %H:%M:%S",
 	)
 
+def string_value(value):
+	if value is None:
+		return ""
+	return str(value).strip()
+
+def normalize_split(value):
+	text = string_value(value).lower()
+	return text if text in SPLITS else ""
+
+def normalize_int_text(value):
+	text = string_value(value)
+	if not text:
+		return ""
+	try:
+		return str(int(float(text)))
+	except ValueError:
+		return text
+
+def numeric_sort_key(value):
+	text = string_value(value)
+	if not text:
+		return (2, 0, "")
+	try:
+		return (0, int(text), "")
+	except ValueError:
+		try:
+			return (0, int(float(text)), "")
+		except ValueError:
+			return (1, 0, text)
+
+def row_score(row, columns):
+	return sum(1 for column in columns if string_value(row.get(column)))
+
+def make_backup(csv_path):
+	if not csv_path.exists():
+		return None
+
+	timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+	backup_path = csv_path.parent / f"{csv_path.name}.bak_{timestamp}"
+	shutil.copy2(csv_path, backup_path)
+	return backup_path
+
 def read_csv_rows(csv_path):
 	if not csv_path.exists():
 		logging.info("CSV not found, skipping read: %s", csv_path)
@@ -186,6 +228,43 @@ def read_csv_rows(csv_path):
 			logging.warning("CSV has no header, treating as empty: %s", csv_path)
 			return []
 		return list(reader)
+
+def parse_street_filename(file_name):
+	match = STREET_FILENAME_PATTERN.fullmatch(file_name)
+	if not match:
+		return None
+
+	groups = match.groupdict()
+	return {
+		"id": string_value(groups["id"]),
+		"split": normalize_split(groups["split"]),
+		"heading": normalize_int_text(groups["heading"]),
+		"pitch": normalize_int_text(groups["pitch"]),
+		"fov": normalize_int_text(groups["fov"]),
+		"ext": string_value(groups["ext"]).lower(),
+	}
+
+def parse_map_filename(file_name):
+	match = MAP_FILENAME_PATTERN.fullmatch(file_name)
+	if not match:
+		return None
+
+	groups = match.groupdict()
+	return {
+		"id": string_value(groups["id"]),
+		"split": normalize_split(groups["split"]),
+		"zoom": normalize_int_text(groups["zoom"]),
+		"tile_x": normalize_int_text(groups["tile_x"]),
+		"tile_y": normalize_int_text(groups["tile_y"]),
+		"ext": string_value(groups["ext"]).lower(),
+	}
+
+def parse_filename(dataset_name, file_name):
+	if dataset_name == "street":
+		return parse_street_filename(file_name)
+	if dataset_name == "map":
+		return parse_map_filename(file_name)
+	return None
 
 def scan_split_files(config, base_dir):
 	files_by_key = {}
