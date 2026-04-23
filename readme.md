@@ -42,7 +42,7 @@ As of the current data (2026-04-22), there are a total of 6792 augmented images 
 6. Label-Studio crashing due to large dataset size: (2026-04-23) [Moderate] [Ongoing]
 While using label-studio for the labelling process, there is an issue of the software crashing due to the large dataset size. This is a significant problem as it hinders the progress of the labelling process and can lead to loss of work if not properly managed. There is a need to find a solution to this issue, such as breaking down the dataset into smaller batches for labelling or finding an alternative labelling tool that can handle larger datasets without crashing. It is crucial to address this issue promptly to ensure that the labelling process can continue smoothly and efficiently.
 
-7. Updating of dataset's metadata: (2026-04-24) [Low] [Ongoing]
+7. Updating of dataset's metadata: (2026-04-24) [Low] [Resolved]
 While labelling and scrutinising the dataset, there is a need to update the metadata of the dataset to ensure that it accurately reflects the data contained within it. The problem could be solved manually by updating the metadata file entries one by one, but this would be a time-consuming process. Moreover, there is a risk of human error when manually updating the metadata, which could lead to inaccuracies in the metadata entries.
 
 ## Mitigation/Solution:
