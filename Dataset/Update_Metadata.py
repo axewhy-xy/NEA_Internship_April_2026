@@ -131,7 +131,27 @@ DATASET_CONFIGS = {
 	),
 }
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# parse_args()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function parses command-line arguments for the metadata reconciliation script. It supports options
+for selecting the dataset to update (street, map, or both), specifying the base directory containing the
+Dataset folder, enabling a dry run mode that performs checks without writing updates, dropping non-file
+rows from the output, disabling backup creation before writing updates, and setting the logging level.
 
+Arguments:
+--dataset: Choice of dataset to update (street, map, or both). Default is "both".
+--base-dir: Base directory containing the Dataset folder. Default is the current directory.
+--dry-run: If set, the script will run checks and provide a summary without writing any CSV files.
+--drop-nonfile-rows: If set, rows with empty paths (non-file rows) will be dropped from the output.
+--no-backup: If set, the script will not create backup CSV files before writing updates.
+--log-level: Logging level for the script output (DEBUG, INFO, WARNING, ERROR). Default is "INFO".
+
+Returns:
+An argparse.Namespace object containing the parsed command-line arguments.
+'''
 def parse_args():
 	parser = argparse.ArgumentParser(
 		description="Reconcile Street/Map metadata CSVs with files on disk."
@@ -169,7 +189,22 @@ def parse_args():
 	)
 	return parser.parse_args()
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# setup_logging()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function sets up the logging configuration for the script. It configures the logging level, format,
+and date format for log messages. The logging level is determined by the log_level argument, which can be
+set to DEBUG, INFO, WARNING, or ERROR. The log messages will include a timestamp, the log level, and the
+message itself.
 
+Arguments:
+log_level: A string representing the logging level (DEBUG, INFO, WARNING, ERROR).
+
+Returns:
+None
+'''
 def setup_logging(log_level):
 	logging.basicConfig(
 		level=getattr(logging, log_level),
@@ -177,18 +212,67 @@ def setup_logging(log_level):
 		datefmt="%Y-%m-%d %H:%M:%S",
 	)
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# string_value()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes an input value and returns a stripped string representation of it. If the input
+value is None, it returns an empty string. This function is used to ensure that all values are consistently
+treated as strings and that any leading or trailing whitespace is removed.
 
+Arguments:
+value: The input value to be converted to a string.
+
+Returns:
+A string representation of the input value, with leading and trailing whitespace removed. If the input
+value is None, it returns an empty string.
+'''
 def string_value(value):
 	if value is None:
 		return ""
 	return str(value).strip()
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# normalize_split()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes an input value and normalizes it to a valid split name (train, valid, or test). It
+converts the input value to a lowercase string and checks if it is one of the valid split names. If it is
+valid, it returns the normalized split name; otherwise, it returns an empty string. This function is used
+to ensure that split names are consistently formatted and valid throughout the script.
 
+Arguments:
+value: The input value to be normalized as a split name.
+
+Returns:
+A normalized split name (train, valid, or test) if the input value is valid; otherwise, an empty string.
+'''
 def normalize_split(value):
 	text = string_value(value).lower()
 	return text if text in SPLITS else ""
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# normalize_int_text()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes an input value and attempts to convert it to an integer. If the conversion is
+successful, it returns the integer as a string. Otherwise, it returns the original string value.
+This function is used to normalize values that are expected to be integers (such as heading, pitch, fov)
+while preserving non-integer values when the conversion fails.
 
+Arguments:
+value: The input value to be normalized as an integer text.
+
+Returns:
+A string representation of the integer value if the conversion is successful;
+otherwise, the original string value.
+
+Raises:
+ValueError: If the input value cannot be converted to an integer or float when it is expected to be numeric.
+'''
 def normalize_int_text(value):
 	text = string_value(value)
 	if not text:
@@ -198,7 +282,31 @@ def normalize_int_text(value):
 	except ValueError:
 		return text
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# numeric_sort_key()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function generates a sort key for a given value that can be used for numeric-aware sorting. It
+first attempts to convert the input value to an integer. If that fails, it tries to convert it to a float
+and then to an integer. If both conversions fail, it treats the value as a string. The sort key is a
+tuple where the first element indicates the type (0 for numeric, 1 for non-numeric, 2 for empty), the second
+element is the numeric value (or 0 for non-numeric), and the third element is the original string value.
+This allows for sorting that prioritizes numeric values while still handling non-numeric and empty values
+consistently.
 
+Arguments:
+value: The input value for which to generate a numeric sort key.
+
+Returns:
+A tuple representing the sort key, where:
+- The first element is an integer indicating the type (0 for numeric, 1 for non-numeric, 2 for empty).
+- The second element is the numeric value if the input is numeric, or 0 for non-numeric values.
+- The third element is the original string value for non-numeric inputs, or an empty string for numeric inputs.
+
+Raises:
+ValueError: If the input value cannot be converted to an integer or float when it is expected to be numeric.
+'''
 def numeric_sort_key(value):
 	text = string_value(value)
 	if not text:
@@ -211,11 +319,47 @@ def numeric_sort_key(value):
 		except ValueError:
 			return (1, 0, text)
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# row_score()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function calculates a score for a given row based on the presence of values in specified columns.
+It iterates through the provided columns and counts how many of them have non-empty string values in the
+row. The score is the total count of columns that contain non-empty values. This function is used to
+evaluate the completeness of a row, with higher scores indicating that more columns have values, which can 
+be useful when selecting between muliple rows for the same file key to determine which one has more metadata
+information to fill in missing details for a file.
 
+Arguments:
+row: A dictionary representing a row of metadata, where keys are column names 
+     and values are the corresponding cell values.
+columns: An iterable of column names to check for non-empty values in the row.
+
+Returns:
+int: The score representing the number of columns with non-empty values in the row.
+'''
 def row_score(row, columns):
 	return sum(1 for column in columns if string_value(row.get(column)))
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# make_backup()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function creates a backup of the specified CSV file by copying it to a new file with a timestamped
+extension. If the specified CSV file does not exist, the function returns None and does not create a backup.
+The backup file is created in the same directory as the original CSV file, and its name is formed by appending
+".bak_" followed by the current timestamp (in the format YYYYMMDD_HHMMSS) to the original file name. 
+The function returns the path to the backup file if it was created successfully.
 
+Arguments:
+csv_path: A Path object representing the path to the CSV file that should be backed up.
+
+Returns:
+A Path object representing the path to the backup file if the backup was created successfully; 
+otherwise, None if the original CSV file does not exist.
+'''
 def make_backup(csv_path):
 	if not csv_path.exists():
 		return None
@@ -225,7 +369,26 @@ def make_backup(csv_path):
 	shutil.copy2(csv_path, backup_path)
 	return backup_path
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# read_csv_rows()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function reads rows from a CSV file and returns them as a list of dictionaries. Each dictionary
+represents a row in the CSV, with keys corresponding to the column headers and values corresponding to
+the cell values. If the specified CSV file does not exist, the function logs an informational message and
+returns an empty list. If the CSV file exists but has no header, the function logs a warning and also returns
+an empty list. The function uses UTF-8 encoding with a signature (BOM) to ensure proper handling of 
+CSV files that may contain special characters.
 
+Arguments:
+csv_path: A Path object representing the path to the CSV file to be read.
+
+Returns:
+A list of dictionaries, where each dictionary represents a row from the CSV file. The keys of the dictionary
+are the column headers from the CSV, and the values are the corresponding cell values for that row. If the CSV
+file does not exist or has no header, the function returns an empty list.
+'''
 def read_csv_rows(csv_path):
 	if not csv_path.exists():
 		logging.info("CSV not found, skipping read: %s", csv_path)
@@ -238,14 +401,56 @@ def read_csv_rows(csv_path):
 			return []
 		return list(reader)
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# normalize_row()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes a row represented as a dictionary and normalizes its values based on the specified columns.
+It creates a new dictionary where each key is a column name from the provided columns, and the corresponding
+value is the string representation of the value from the input row for that column. If a column is missing
+in the input row, it defaults to an empty string. This function ensures that all rows have a consistent set of
+columns with string values, which can be important for later processing and comparison of rows.
 
+Arguments:
+row: A dictionary representing a row of metadata, where keys are column names 
+	 and values are the corresponding cell values.
+columns: An iterable of column names that should be present in the normalized row.
+
+Returns:
+A new dictionary where each key is a column name from the provided columns, and the value is the string
+representation of the corresponding value from the input row. If a column is missing in the input row
+or its value is None, the value in the normalized row will be an empty string.
+'''
 def normalize_row(row, columns):
 	normalized = {column: "" for column in columns}
 	for column in columns:
 		normalized[column] = string_value(row.get(column, ""))
 	return normalized
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# write_csv_rows()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function writes a list of rows to a CSV file at the specified path. It first ensures that the parent
+directory of the CSV file exists, creating it if necessary. If backup_enabled is True, it creates a backup
+of the existing CSV file before writing the new rows. The function then opens the CSV file for writing with
+UTF-8 encoding and uses a csv.DictWriter to write the header and rows to the file. Each row is written as a
+dictionary where the keys are the column names and the values are the corresponding cell values. The function
+also appends the path of any backup file created to the backups list provided as an argument.
 
+Arguments:
+csv_path: A Path object representing the path to the CSV file where the rows should be written.
+columns: An iterable of column names that should be used as the header for the CSV file.
+rows: A list of dictionaries, where each dictionary represents a row to be written to the CSV file. The keys
+	  of the dictionary should correspond to the column names.
+backup_enabled: A boolean indicating whether a backup of the existing CSV file should be created before writing.
+backups: A list to which the path of any backup file created will be appended.
+
+Returns:
+None
+'''
 def write_csv_rows(csv_path, columns, rows, backup_enabled, backups):
 	csv_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -260,7 +465,36 @@ def write_csv_rows(csv_path, columns, rows, backup_enabled, backups):
 		for row in rows:
 			writer.writerow({column: row.get(column, "") for column in columns})
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# parse_street_filename()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes a file name as input and attempts to parse it according to the expected format for
+street dataset images. The expected format is: {id}_{split}_h{heading}_p{pitch}_f{fov}.{ext}, where:
+- {id} is a unique identifier for the sample.
+- {split} is the dataset split (train, valid, or test).
+- {heading} is the heading angle of the street view image.
+- {pitch} is the pitch angle of the street view image.
+- {fov} is the field of view of the street view image.
+- {ext} is the file extension (e.g., jpg, png).
+The function uses a regular expression to match the file name against this pattern. If the file name matches,
+it extracts the components and returns them in a dictionary. If the file name does not match the expected format,
+the function returns None.
 
+Arguments:
+file_name: A string representing the name of the file to be parsed.
+
+Returns:
+A dictionary containing the parsed components of the file name if it matches the expected format, with keys:
+- "id": The unique identifier for the sample.
+- "split": The dataset split (train, valid, or test).
+- "heading": The heading angle of the street view image.
+- "pitch": The pitch angle of the street view image.
+- "fov": The field of view of the street view image.
+- "ext": The file extension (e.g., jpg, png).
+If the file name does not match the expected format, the function returns None.
+'''
 def parse_street_filename(file_name):
 	match = STREET_FILENAME_PATTERN.fullmatch(file_name)
 	if not match:
@@ -276,7 +510,36 @@ def parse_street_filename(file_name):
 		"ext": string_value(groups["ext"]).lower(),
 	}
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# parse_map_filename()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes a file name as input and attempts to parse it according to the expected format for
+map dataset images. The expected format is: {id}_{split}_z{zoom}_x{tile_x}_y{tile_y}.{ext}, where:
+- {id} is a unique identifier for the sample.
+- {split} is the dataset split (train, valid, or test).
+- {zoom} is the zoom level of the map tile.
+- {tile_x} is the x coordinate of the map tile.
+- {tile_y} is the y coordinate of the map tile.
+- {ext} is the file extension (e.g., jpg, png).
+The function uses a regular expression to match the file name against this pattern. If the file name matches,
+it extracts the components and returns them in a dictionary. If the file name does not match the expected format,
+the function returns None.
 
+Arguments:
+file_name: A string representing the name of the file to be parsed.
+
+Returns:
+A dictionary containing the parsed components of the file name if it matches the expected format, with keys:
+- "id": The unique identifier for the sample.
+- "split": The dataset split (train, valid, or test).
+- "zoom": The zoom level of the map tile.
+- "tile_x": The x coordinate of the map tile.
+- "tile_y": The y coordinate of the map tile.
+- "ext": The file extension (e.g., jpg, png).
+If the file name does not match the expected format, the function returns None.
+'''
 def parse_map_filename(file_name):
 	match = MAP_FILENAME_PATTERN.fullmatch(file_name)
 	if not match:
@@ -292,7 +555,42 @@ def parse_map_filename(file_name):
 		"ext": string_value(groups["ext"]).lower(),
 	}
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# parse_filename()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes a dataset name and a file name as input and attempts to parse the file name according
+to the expected format for the specified dataset. It supports two dataset types, "street" and "map", each
+with its own expected file name format. The function delegates the parsing to the appropriate parsing function
+based on the dataset name. If the dataset name is "street", it calls parse_street_filename. If the dataset name
+is "map", it calls parse_map_filename. If the dataset name is not recognized, the function returns None.
 
+Arguments:
+dataset_name: A string representing the name of the dataset ("street" or "map") for 
+			  which the file name should be parsed.
+file_name: A string representing the name of the file to be parsed.
+
+Returns:
+A dictionary containing the parsed components of the file name if it matches the expected format for the
+specified dataset. The keys in the dictionary will depend on the dataset type:
+- For "street" dataset:
+  - "id": The unique identifier for the sample.
+  - "split": The dataset split (train, valid, or test).
+  - "heading": The heading angle of the street view image.
+  - "pitch": The pitch angle of the street view image.
+  - "fov": The field of view of the street view image.
+  - "ext": The file extension (e.g., jpg, png).
+- For "map" dataset:
+  - "id": The unique identifier for the sample.
+  - "split": The dataset split (train, valid, or test).
+  - "zoom": The zoom level of the map tile.
+  - "tile_x": The x coordinate of the map tile.
+  - "tile_y": The y coordinate of the map tile.
+  - "ext": The file extension (e.g., jpg, png).
+If the file name does not match the expected format for the specified dataset, or if the 
+dataset name is not recognized, the function returns None.
+'''
 def parse_filename(dataset_name, file_name):
 	if dataset_name == "street":
 		return parse_street_filename(file_name)
@@ -300,7 +598,38 @@ def parse_filename(dataset_name, file_name):
 		return parse_map_filename(file_name)
 	return None
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# build_key_from_parts()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes a dataset name and a dictionary of parts extracted from a file name and builds a
+key tuple that uniquely identifies a file in the dataset. The key is constructed based on the dataset
+type. For the "street" dataset, the key consists of the sample ID, split name, heading, pitch, and
+field of view. For the "map" dataset, the key consists of the sample ID, split name, zoom level, tile_x,
+and tile_y. The function first normalizes the split name and sample ID, and then checks if the necessary
+components are present. If any required component is missing or invalid, the function returns None. Otherwise,
+it returns the constructed key tuple.
 
+Arguments:
+dataset_name: A string representing the name of the dataset ("street" or "map") for which the key should be built.
+parts: A dictionary containing the components extracted from a file name, which may include:
+- "id": The unique identifier for the sample.
+- "split": The dataset split (train, valid, or test).
+- For "street" dataset:
+  - "heading": The heading angle of the street view image.
+  - "pitch": The pitch angle of the street view image.
+  - "fov": The field of view of the street view image.
+
+- For "map" dataset:
+  - "zoom": The zoom level of the map tile.
+  - "tile_x": The x coordinate of the map tile.
+  - "tile_y": The y coordinate of the map tile.
+
+Returns:
+A tuple representing the key that uniquely identifies a file in the dataset if all required components are valid;
+otherwise, None if any required component is missing or invalid.
+'''
 def build_key_from_parts(dataset_name, parts):
 	split_name = normalize_split(parts.get("split", ""))
 	sample_id = string_value(parts.get("id", ""))
@@ -323,7 +652,30 @@ def build_key_from_parts(dataset_name, parts):
 		return None
 	return (sample_id, split_name, zoom, tile_x, tile_y)
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# build_key_from_row()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes a dataset name and a row of metadata (as a dictionary) and attempts to build a key
+tuple that uniquely identifies a file in the dataset. It first extracts relevant parts from the row,
+such as the sample ID, split name, and other components depending on the dataset type. It then attempts
+to build the key using the build_key_from_parts function. If the key cannot be built from the row parts,
+it tries to parse the file name from the "path" field of the row to extract the necessary components to
+build the key. If the file name can be parsed successfully, it uses the parsed components to build the key.
+If all attempts to build the key fail, the function returns None. This function is used to determine the
+unique identifier for a metadata row based on its content, which can then be used to match it against files
+on disk.
 
+Arguments:
+dataset_name: A string representing the name of the dataset ("street" or "map") for which the key should be built.
+row: A dictionary representing a row of metadata, where keys are column names and values are 
+	 the corresponding cell values.
+
+Returns:
+A tuple representing the key that uniquely identifies a file in the dataset if it can be built from the row;
+otherwise, None if the key cannot be built from the row parts or the file name cannot be parsed successfully.
+'''
 def build_key_from_row(dataset_name, row):
 	parts = {
 		"id": string_value(row.get("id", "")),
@@ -360,20 +712,97 @@ def build_key_from_row(dataset_name, row):
 
 	return build_key_from_parts(dataset_name, parsed)
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# image_format_from_extension()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes a file extension as input and returns the corresponding image format string. It first
+normalizes the extension by converting it to lowercase and stripping any leading periods. If the extension
+is "jpg", it returns "jpeg" as the image format, since "jpeg" is the standard format name used in metadata.
+For any other extension, it returns the normalized extension as the image format. This function is used to
+determine the image format for map tiles based on their file extensions, ensuring that the metadata reflects
+the correct format regardless of how the file is named on disk.
 
+Arguments:
+extension: A string representing the file extension (e.g., "jpg", "png") from which to derive the image format.
+
+Returns:
+A string representing the image format corresponding to the given file extension. If the extension is "jpg",
+it returns "jpeg". For any other extension, it returns the normalized extension itself as the image format.
+'''
 def image_format_from_extension(extension):
 	ext = string_value(extension).lower().lstrip(".")
 	if ext == "jpg":
 		return "jpeg"
 	return ext
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# build_metadata_path()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function constructs the metadata path for a given file based on the dataset configuration, split
+name, and file name. It uses the path prefix from the dataset configuration, the split directory name
+corresponding to the split name, and the file name to build a Windows-style path that can be used in
+the metadata CSV. The function first retrieves the split directory name from the dataset configuration
+using the split name, then constructs the path by combining the path prefix, split directory name, and
+file name using the PureWindowsPath class to ensure that the resulting path is in the correct format for
+Windows. Finally, it returns the constructed path as a string. This function is used to generate the
+correct path to the image files in the metadata based on the file's location on disk and the dataset
+structure defined in the configuration.
 
+Arguments:
+config: A DatasetConfig object containing the configuration for the dataset, 
+		including path prefix and split directories.
+split_name: A string representing the name of the dataset split (train, valid, or test) 
+			for which to build the metadata path.
+file_name: A string representing the name of the file for which to build the metadata path.
+
+Returns:
+A string representing the constructed metadata path for the given file, formatted as a Windows-style path.
+'''
 def build_metadata_path(config, split_name, file_name):
 	split_dir_name = Path(config.split_dirs[split_name]).name
 	win_path = PureWindowsPath(config.path_prefix) / split_dir_name / file_name
 	return str(win_path)
 
+'''
+# ------------------------------------------------------------------------------------
+# scan_split_files()
+# ------------------------------------------------------------------------------------
+Description:
+This function scans the directories for each dataset split (train, valid, test) as defined
+in the dataset configuration and collects information about the image files found. It 
+iterates through each split directory, checks for supported image files, and attempts to 
+parse the file names to extract metadata components. The function builds a dictionary of files
+indexed by a unique key derived from the parsed file name components. It also collects
+statistics about the number of files scanned, any parsing errors encountered, and any duplicate
+keys found. The resulting dictionary of files includes the parsed components, the file name,
+the absolute path to the file, and the corresponding metadata path that should be used in the CSV.
+The function returns a dictionary containing the files indexed by key, the total number of files
+scanned, a list of parsing errors, and a list of duplicate keys with their corresponding file paths.
 
+Arguments:
+config: A DatasetConfig object containing the configuration for the dataset, 
+		including split directories and path prefix.
+base_dir: A Path object representing the base directory containing the split directories.
+
+Returns:
+A dictionary with the following structure:
+{
+	"files_by_key": A dictionary where keys are unique identifiers derived 
+					from the parsed file name components, and values are dictionaries containing:
+		- "parts": The parsed components extracted from the file name.
+		- "file_name": The name of the file.
+		- "abs_path": The absolute path to the file on disk.
+		- "metadata_path": The path that should be used in the metadata CSV for this file.
+	"files_scanned": The total number of files that were scanned across all split directories.
+	"parse_errors": A list of file paths that could not be parsed successfully.
+	"duplicate_keys": A list of tuples, where each tuple contains a duplicate key and the 
+					  corresponding file paths that share that key.
+}
+'''
 def scan_split_files(config, base_dir):
 	files_by_key = {}
 	parse_errors = []
@@ -435,7 +864,30 @@ def scan_split_files(config, base_dir):
 		"duplicate_keys": duplicate_keys,
 	}
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# select_best_row()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes two rows of metadata and a list of columns, and selects the row that has the highest
+score based on the presence of non-empty values in the specified columns. The score for each row is 
+calculated using the row_score function, which counts how many of the specified columns have non-empty
+values. If the current_row is None, the function returns the candidate_row. If the candidate_row has 
+a higher score than the current_row, it returns the candidate_row. Otherwise, it returns the current_row.
+This function is used to determine which of two rows should be preferred when they represent the same file
+key, with the goal of retaining the row that has more metadata information filled in for the specified columns.
 
+Arguments:
+current_row: A dictionary representing the current row of metadata, or None if there is no current row.
+candidate_row: A dictionary representing the candidate row of metadata that is being considered for selection.
+columns: An iterable of column names that should be considered when calculating the score for each row.
+
+Returns:
+A dictionary representing the row that has the highest score based on the presence of non-empty values 
+in the specified columns. If current_row is None, it returns candidate_row. 
+If candidate_row has a higher score than current_row, it returns candidate_row; 
+otherwise, it returns current_row.
+'''
 def select_best_row(current_row, candidate_row, columns):
 	if current_row is None:
 		return candidate_row
@@ -445,7 +897,32 @@ def select_best_row(current_row, candidate_row, columns):
 
 	return current_row
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# build_context_by_key()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function builds a context dictionary indexed by file keys from a list of existing metadata rows. It
+iterates through the existing rows and attempts to build a key for each row using the build_key_from_row
+function. If a key can be built successfully, it normalizes the row and uses the select_best_row function
+to determine if this row should be stored in the context for that key, based on the presence of metadata
+values in the specified columns. The function also counts how many rows had invalid file keys that could
+not be built. The resulting context_by_key dictionary maps each valid file key to the best corresponding
+metadata row found in the existing rows. The function returns the context_by_key dictionary and the count of
+invalid file rows.
 
+Arguments:
+config: A DatasetConfig object containing the configuration for the dataset, including column names.
+existing_rows: A list of dictionaries, where each dictionary represents an existing row of metadata. The keys
+			   of the dictionary are column names, and the values are the corresponding cell values for that row.
+
+Returns:
+A tuple containing:
+- context_by_key: A dictionary where keys are file keys built from the existing rows, 
+				  and values are the best corresponding metadata rows (as dictionaries) 
+				  for those keys based on the presence of non-empty values in the specified columns.
+- invalid_file_rows: An integer count of how many existing rows had invalid file keys that could not be built.
+'''
 def build_context_by_key(config, existing_rows):
 	context_by_key = {}
 	invalid_file_rows = 0
@@ -468,7 +945,29 @@ def build_context_by_key(config, existing_rows):
 
 	return context_by_key, invalid_file_rows
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# build_id_context()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function builds a context dictionary indexed by sample IDs from a list of existing metadata rows. It
+iterates through the existing rows and extracts the sample ID from each row. If a sample ID is present, it
+normalizes the row and uses the select_best_row function to determine if this row should be stored in the
+context for that sample ID, based on the presence of metadata values in the specified columns. The resulting
+context_by_id dictionary maps each sample ID to the best corresponding metadata row found in the existing rows.
+The function returns the context_by_id dictionary, which can be used to look up metadata rows based on sample
+IDs, allowing for filling in missing metadata for files that share the same sample ID but may have different
+file keys (e.g., due to differences in heading, pitch, fov for street dataset or zoom, tile_x, tile_y for map dataset).
 
+Arguments:
+config: A DatasetConfig object containing the configuration for the dataset, including column names.
+existing_rows: A list of dictionaries, where each dictionary represents an existing row of metadata. The keys
+			   of the dictionary are column names, and the values are the corresponding cell values for that row.
+
+Returns:
+A dictionary where keys are sample IDs extracted from the existing rows, and values are the best corresponding
+metadata rows (as dictionaries) for those sample IDs based on the presence of non-empty values in the specified columns.
+'''
 def build_id_context(config, existing_rows):
 	context_by_id = {}
 
@@ -486,7 +985,29 @@ def build_id_context(config, existing_rows):
 
 	return context_by_id
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# dedupe_rows()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes a list of rows and a list of columns, and returns a new list of rows with duplicates 
+removed based on the specified columns. It creates a set to keep track of seen signatures, where each 
+signature is a tuple of string values for the specified columns in a row. As it iterates through the 
+input rows, it generates the signature for each row and checks if it has been seen before. If the 
+signature is new, it adds it to the seen set and includes the row in the unique_rows list. If the 
+signature has already been seen, it skips that row. The resulting unique_rows list contains only one 
+instance of each unique combination of values for the specified columns.
 
+Arguments:
+rows: A list of dictionaries, where each dictionary represents a row of metadata. The keys of the dictionary
+	  are column names, and the values are the corresponding cell values for that row.
+columns: An iterable of column names that should be considered when determining if rows are duplicates.
+
+Returns:
+A list of dictionaries representing the unique rows from the input list, where uniqueness is determined
+based on the combination of string values for the specified columns. If multiple rows have the same values
+for the specified columns, only the first occurrence will be included in the returned list.
+'''
 def dedupe_rows(rows, columns):
 	seen = set()
 	unique_rows = []
@@ -500,7 +1021,34 @@ def dedupe_rows(rows, columns):
 
 	return unique_rows
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# build_row_for_file()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function builds a metadata row for a given file based on the dataset configuration, file information,
+and existing context rows. It takes the parsed components of the file name, the file name itself, and the
+metadata path, and constructs a new row dictionary with the appropriate values for each column. It also
+attempts to fill in missing metadata values from the existing context rows based on the file key and sample ID.
+The function ensures that the required fields such as "id", "split", "path", and "status" are populated, 
+and it fills in additional metadata fields based on the dataset type (street or map). The resulting row 
+is a complete representation of the metadata for the given file, which can then be included in the output CSV.
 
+Arguments:
+config: A DatasetConfig object containing the configuration for the dataset, including column names and dataset type.
+file_info: A dictionary containing information about the file, including:
+- "parts": The parsed components extracted from the file name.
+- "file_name": The name of the file.
+- "abs_path": The absolute path to the file on disk.
+- "metadata_path": The path that should be used in the metadata CSV for this file.
+key_row: A dictionary representing the existing metadata row that matches the file key, or None if no match is found.
+id_row: A dictionary representing the existing metadata row that matches the sample ID, or None if no match is found.
+
+Returns:
+A dictionary representing the metadata row for the given file, with values populated based on the file information
+and existing context rows. The keys of the dictionary correspond to the column names defined in the dataset 
+configuration, and the values are the corresponding cell values for that row.
+'''
 def build_row_for_file(config, file_info, key_row, id_row):
 	parts = file_info["parts"]
 	row = {column: "" for column in config.columns}
@@ -539,7 +1087,28 @@ def build_row_for_file(config, file_info, key_row, id_row):
 
 	return row
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# sort_rows()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function sorts a list of metadata rows based on a defined order of splits and then by specific 
+metadata fields. The sorting key is constructed as a tuple that first considers the split order 
+(train, valid, test), then the sample ID, and finally additional fields depending on the dataset 
+type (heading, pitch, fov for street dataset or zoom, tile_x, tile_y for map dataset). If the split 
+is not recognized, it is given a default order value to ensure it is sorted after known splits. The 
+function returns a new list of rows sorted according to this defined order.
 
+Arguments:
+config: A DatasetConfig object containing the configuration for the dataset, including dataset type.
+rows: A list of dictionaries, where each dictionary represents a row of metadata. The keys of the dictionary
+	  are column names, and the values are the corresponding cell values for that row.
+
+Returns:
+A list of dictionaries representing the input rows sorted according to the defined order based on 
+split and metadata fields. The sorting is stable and consistent with the specified criteria for 
+each dataset type.
+'''
 def sort_rows(config, rows):
 	def _sort_key(row):
 		split_key = SPLIT_ORDER.get(normalize_split(row.get("split", "")), 99)
@@ -567,7 +1136,52 @@ def sort_rows(config, rows):
 
 	return sorted(rows, key=_sort_key)
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# reconcile_dataset()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function performs the reconciliation of the dataset metadata by comparing the existing metadata rows
+with the actual files found in the split directories. It reads the existing combined metadata and split metadata,
+builds a context for existing rows, scans the split directories to find actual files and their parsed keys,
+and then constructs new metadata rows for the files based on the existing context. It also handles non-file rows
+based on the keep_nonfile_rows flag, deduplicates them, and combines them with the file rows. The resulting
+combined metadata rows are then sorted and written back to the combined metadata CSV, and the split metadata CSVs
+are also updated with the corresponding rows for each split. The function returns a summary of the reconciliation
+process, including statistics about files scanned, indexed, parse errors, duplicate keys, and the number of rows
+in the output.
 
+Arguments:
+config: A DatasetConfig object containing the configuration for the dataset, including paths and column names.
+base_dir: A Path object representing the base directory containing the split directories and metadata files.
+dry_run: A boolean flag indicating whether to perform a dry run (i.e., do not write any changes to disk).
+keep_nonfile_rows: A boolean flag indicating whether to keep non-file rows from the existing combined metadata.
+backup_enabled: A boolean flag indicating whether to create backup files when writing changes to disk.
+
+Returns:
+A dictionary containing a summary of the reconciliation process, including:
+- "dataset": The name of the dataset.
+- "dry_run": Whether the reconciliation was a dry run.
+- "files_scanned": The total number of files scanned in the split directories.
+- "files_indexed": The number of files that were successfully indexed with valid keys.
+- "parse_errors": The number of files that could not be parsed successfully.
+- "duplicate_file_keys": The number of duplicate file keys found during scanning.
+- "existing_file_keys": The number of existing file keys found in the existing metadata.
+- "actual_file_keys": The number of actual file keys found in the split directories.
+- "kept_file_keys": The number of file keys that were present in both existing metadata and actual files.
+- "added_file_keys": The number of file keys that were found in actual files but not in existing metadata.
+- "removed_file_keys": The number of file keys that were present in existing metadata but not
+					 in actual files.
+- "invalid_existing_file_rows": The number of existing metadata rows that had invalid file keys.
+- "preserved_nonfile_rows": The number of non-file rows that were preserved in the output.
+- "combined_output_rows": The total number of rows in the combined output metadata.
+- "split_output_rows": A dictionary mapping each split name to the number of rows in the 
+					   corresponding split output metadata.
+- "combined_metadata_path": The path to the combined metadata CSV file.
+- "split_metadata_paths": A dictionary mapping each split name to the path of the corresponding split
+					 metadata CSV file.
+- "backups": A list of backup file paths that were created during the write process (if backup_enabled is True).
+'''
 def reconcile_dataset(config, base_dir, dry_run, keep_nonfile_rows, backup_enabled):
 	combined_path = base_dir / Path(config.combined_metadata)
 	split_paths = {
@@ -674,7 +1288,27 @@ def reconcile_dataset(config, base_dir, dry_run, keep_nonfile_rows, backup_enabl
 		"backups": backups,
 	}
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# log_dataset_summary()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function logs a summary of the dataset reconciliation process using the logging module. It takes a 
+summary dictionary as input, which contains various statistics and information about the reconciliation 
+process, such as the number of files scanned, indexed, parse errors, duplicate keys, existing and actual 
+file keys, preserved non-file rows, combined output rows, split output rows, paths to the combined and 
+split metadata files, and any backup files created. The function logs this information in a structured 
+format to provide insights into the results of the reconciliation process for each dataset.
 
+Arguments:
+summary: A dictionary containing a summary of the dataset reconciliation process, 
+		 including statistics and information about files scanned, indexed, 
+		 parse errors, duplicate keys, existing and actual file keys, preserved non-file rows, 
+		 combined output rows, split output rows, paths to metadata files, and backup files created.
+
+Returns:
+None. This function logs the summary information but does not return any value.
+'''
 def log_dataset_summary(summary):
 	logging.info("Dataset: %s", summary["dataset"])
 	logging.info("Dry run: %s", summary["dry_run"])
@@ -705,7 +1339,24 @@ def log_dataset_summary(summary):
 	if summary["backups"]:
 		logging.info("Backup files created: %s", len(summary["backups"]))
 
+'''
+# ----------------------------------------------------------------------------------------------------
+# run()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function serves as the main execution for the metadata reconciliation process. It parses 
+command-line arguments, sets up logging, and iterates through the selected datasets 
+(street, map, or both) to perform the reconciliation using the reconcile_dataset function. 
+After processing each dataset, it logs a summary of the results. The function is designed to be 
+run as a script, and it ensures that the reconciliation process is executed with the appropriate 
+configuration and options based on the provided arguments.
 
+Arguments:
+None. This function relies on command-line arguments for configuration.
+
+Returns:
+None. This function executes the reconciliation process and logs the results but does not return any value.
+'''
 def run():
 	args = parse_args()
 	setup_logging(args.log_level)
@@ -735,7 +1386,7 @@ def run():
 
 	logging.info("Metadata reconciliation complete.")
 
-
+# Main entry point
 if __name__ == "__main__":
 	run()
 
