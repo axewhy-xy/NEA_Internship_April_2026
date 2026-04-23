@@ -390,6 +390,44 @@ def scan_split_files(config, base_dir):
 		"duplicate_keys": duplicate_keys,
 	}
 
+def build_context_by_key(config, existing_rows):
+	context_by_key = {}
+	invalid_file_rows = 0
+
+	for row in existing_rows:
+		if not string_value(row.get("path", "")):
+			continue
+
+		key = build_key_from_row(config.name, row)
+		if key is None:
+			invalid_file_rows += 1
+			continue
+
+		normalized = normalize_row(row, config.columns)
+		context_by_key[key] = select_best_row(
+			context_by_key.get(key),
+			normalized,
+			config.columns,
+		)
+
+	return context_by_key, invalid_file_rows
+
+def build_id_context(config, existing_rows):
+	context_by_id = {}
+
+	for row in existing_rows:
+		sample_id = string_value(row.get("id", ""))
+		if not sample_id:
+			continue
+
+		normalized = normalize_row(row, config.columns)
+		context_by_id[sample_id] = select_best_row(
+			context_by_id.get(sample_id),
+			normalized,
+			config.columns,
+		)
+
+	return context_by_id
 
 def reconcile_dataset(config, base_dir, dry_run, keep_nonfile_rows, backup_enabled):
 	combined_path = base_dir / Path(config.combined_metadata)
