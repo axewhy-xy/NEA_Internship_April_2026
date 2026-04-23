@@ -174,6 +174,8 @@ def setup_logging(log_level):
 		format="%(asctime)s | %(levelname)s | %(message)s",
 		datefmt="%Y-%m-%d %H:%M:%S",
 	)
+
+
 	
 def reconcile_dataset(config, base_dir, dry_run, keep_nonfile_rows, backup_enabled):
 	combined_path = base_dir / Path(config.combined_metadata)
@@ -280,6 +282,36 @@ def reconcile_dataset(config, base_dir, dry_run, keep_nonfile_rows, backup_enabl
 		},
 		"backups": backups,
 	}
+
+def log_dataset_summary(summary):
+	logging.info("Dataset: %s", summary["dataset"])
+	logging.info("Dry run: %s", summary["dry_run"])
+	logging.info(
+		"Files scanned=%s indexed=%s parse_errors=%s duplicate_keys=%s",
+		summary["files_scanned"],
+		summary["files_indexed"],
+		summary["parse_errors"],
+		summary["duplicate_file_keys"],
+	)
+	logging.info(
+		"Existing keys=%s actual keys=%s kept=%s added=%s removed=%s invalid_existing_rows=%s",
+		summary["existing_file_keys"],
+		summary["actual_file_keys"],
+		summary["kept_file_keys"],
+		summary["added_file_keys"],
+		summary["removed_file_keys"],
+		summary["invalid_existing_file_rows"],
+	)
+	logging.info(
+		"Preserved non-file rows=%s combined output rows=%s",
+		summary["preserved_nonfile_rows"],
+		summary["combined_output_rows"],
+	)
+	logging.info("Split output rows: %s", summary["split_output_rows"])
+	logging.info("Combined metadata: %s", summary["combined_metadata_path"])
+	logging.info("Split metadata: %s", summary["split_metadata_paths"])
+	if summary["backups"]:
+		logging.info("Backup files created: %s", len(summary["backups"]))
 
 def run():
 	args = parse_args()
