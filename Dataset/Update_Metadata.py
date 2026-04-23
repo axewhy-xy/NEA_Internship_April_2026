@@ -175,8 +175,80 @@ def setup_logging(log_level):
 		datefmt="%Y-%m-%d %H:%M:%S",
 	)
 
+def read_csv_rows(csv_path):
+	if not csv_path.exists():
+		logging.info("CSV not found, skipping read: %s", csv_path)
+		return []
 
-	
+	with open(csv_path, "r", newline="", encoding="utf-8-sig") as handle:
+		reader = csv.DictReader(handle)
+		if not reader.fieldnames:
+			logging.warning("CSV has no header, treating as empty: %s", csv_path)
+			return []
+		return list(reader)
+
+def scan_split_files(config, base_dir):
+	files_by_key = {}
+	parse_errors = []
+	duplicate_keys = []
+	files_scanned = 0
+
+	for split_name in SPLITS:
+		split_dir = base_dir / Path(config.split_dirs[split_name])
+		if not split_dir.exists():
+			logging.warning("Split directory not found: %s", split_dir)
+			continue
+
+		if not split_dir.is_dir():
+			logging.warning("Split path is not a directory: %s", split_dir)
+			continue
+
+		for file_path in sorted(split_dir.iterdir(), key=lambda path: path.name.lower()):
+			if not file_path.is_file():
+				continue
+
+			if file_path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+				continue
+
+			files_scanned += 1
+			parsed = parse_filename(config.name, file_path.name)
+			if parsed is None:
+				parse_errors.append(str(file_path))
+				continue
+
+			if parsed["split"] and parsed["split"] != split_name:
+				logging.warning(
+					"Filename split mismatch (%s != %s): %s",
+					parsed["split"],
+					split_name,
+					file_path,
+				)
+
+			parsed["split"] = split_name
+			key = build_key_from_parts(config.name, parsed)
+			if key is None:
+				parse_errors.append(str(file_path))
+				continue
+
+			if key in files_by_key:
+				duplicate_keys.append((key, str(file_path), files_by_key[key]["abs_path"]))
+				continue
+
+			files_by_key[key] = {
+				"parts": parsed,
+				"file_name": file_path.name,
+				"abs_path": str(file_path),
+				"metadata_path": build_metadata_path(config, split_name, file_path.name),
+			}
+
+	return {
+		"files_by_key": files_by_key,
+		"files_scanned": files_scanned,
+		"parse_errors": parse_errors,
+		"duplicate_keys": duplicate_keys,
+	}
+
+
 def reconcile_dataset(config, base_dir, dry_run, keep_nonfile_rows, backup_enabled):
 	combined_path = base_dir / Path(config.combined_metadata)
 	split_paths = {
