@@ -266,6 +266,69 @@ def parse_filename(dataset_name, file_name):
 		return parse_map_filename(file_name)
 	return None
 
+def build_key_from_parts(dataset_name, parts):
+	split_name = normalize_split(parts.get("split", ""))
+	sample_id = string_value(parts.get("id", ""))
+
+	if not sample_id or not split_name:
+		return None
+
+	if dataset_name == "street":
+		heading = normalize_int_text(parts.get("heading", ""))
+		pitch = normalize_int_text(parts.get("pitch", ""))
+		fov = normalize_int_text(parts.get("fov", ""))
+		if not heading or not pitch or not fov:
+			return None
+		return (sample_id, split_name, heading, pitch, fov)
+
+	zoom = normalize_int_text(parts.get("zoom", ""))
+	tile_x = normalize_int_text(parts.get("tile_x", ""))
+	tile_y = normalize_int_text(parts.get("tile_y", ""))
+	if not zoom or not tile_x or not tile_y:
+		return None
+	return (sample_id, split_name, zoom, tile_x, tile_y)
+
+def build_key_from_row(dataset_name, row):
+	parts = {
+		"id": string_value(row.get("id", "")),
+		"split": normalize_split(row.get("split", "")),
+	}
+
+	if dataset_name == "street":
+		parts["heading"] = normalize_int_text(row.get("heading", ""))
+		parts["pitch"] = normalize_int_text(row.get("pitch", ""))
+		parts["fov"] = normalize_int_text(row.get("fov", ""))
+	else:
+		parts["zoom"] = normalize_int_text(row.get("zoom", ""))
+		parts["tile_x"] = normalize_int_text(row.get("tile_x", ""))
+		parts["tile_y"] = normalize_int_text(row.get("tile_y", ""))
+
+	key = build_key_from_parts(dataset_name, parts)
+	if key is not None:
+		return key
+
+	path_text = string_value(row.get("path", ""))
+	if not path_text:
+		return None
+
+	file_name = Path(path_text.replace("\\", "/")).name
+	parsed = parse_filename(dataset_name, file_name)
+	if parsed is None:
+		return None
+
+	if parts["split"]:
+		parsed["split"] = parts["split"]
+
+	if parts["id"]:
+		parsed["id"] = parts["id"]
+
+	return build_key_from_parts(dataset_name, parsed)
+
+def build_metadata_path(config, split_name, file_name):
+	split_dir_name = Path(config.split_dirs[split_name]).name
+	win_path = PureWindowsPath(config.path_prefix) / split_dir_name / file_name
+	return str(win_path)
+
 def scan_split_files(config, base_dir):
 	files_by_key = {}
 	parse_errors = []
