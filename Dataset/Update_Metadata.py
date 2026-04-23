@@ -175,6 +175,112 @@ def setup_logging(log_level):
 		datefmt="%Y-%m-%d %H:%M:%S",
 	)
 	
+def reconcile_dataset(config, base_dir, dry_run, keep_nonfile_rows, backup_enabled):
+	combined_path = base_dir / Path(config.combined_metadata)
+	split_paths = {
+		split_name: base_dir / Path(config.split_metadata[split_name]) for split_name in SPLITS
+	}
+
+	combined_rows_existing = read_csv_rows(combined_path)
+	split_rows_existing = []
+	for split_name in SPLITS:
+		split_rows_existing.extend(read_csv_rows(split_paths[split_name]))
+
+	all_existing_rows = combined_rows_existing + split_rows_existing
+
+	scan_result = scan_split_files(config, base_dir)
+	files_by_key = scan_result["files_by_key"]
+
+	context_by_key, invalid_file_rows = build_context_by_key(config, all_existing_rows)
+	id_context = build_id_context(config, all_existing_rows)
+
+	actual_keys = set(files_by_key.keys())
+	existing_keys = set(context_by_key.keys())
+
+	file_rows = []
+	for key, file_info in files_by_key.items():
+		key_row = context_by_key.get(key)
+		id_row = id_context.get(file_info["parts"]["id"])
+		file_rows.append(build_row_for_file(config, file_info, key_row, id_row))
+
+	nonfile_rows = []
+	if keep_nonfile_rows:
+		for row in combined_rows_existing:
+			if string_value(row.get("path", "")):
+				continue
+
+			normalized = normalize_row(row, config.columns)
+			if normalize_split(normalized.get("split", "")) not in SPLITS:
+				continue
+
+			nonfile_rows.append(normalized)
+
+		nonfile_rows = dedupe_rows(nonfile_rows, config.columns)
+
+	combined_output_rows = sort_rows(config, file_rows + nonfile_rows)
+
+	split_output_rows = {}
+	for split_name in SPLITS:
+		split_rows = [
+			row
+			for row in combined_output_rows
+			if normalize_split(row.get("split", "")) == split_name
+		]
+		split_output_rows[split_name] = sort_rows(config, split_rows)
+
+	backups = []
+	if not dry_run:
+		write_csv_rows(combined_path, config.columns, combined_output_rows, backup_enabled, backups)
+		for split_name in SPLITS:
+			write_csv_rows(
+				split_paths[split_name],
+				config.columns,
+				split_output_rows[split_name],
+				backup_enabled,
+				backups,
+			)
+
+	if scan_result["parse_errors"]:
+		logging.warning(
+			"%s | unparseable filenames: %s",
+			config.name,
+			len(scan_result["parse_errors"]),
+		)
+		for sample in scan_result["parse_errors"][:10]:
+			logging.warning("%s | parse error sample: %s", config.name, sample)
+
+	if scan_result["duplicate_keys"]:
+		logging.warning(
+			"%s | duplicate file keys found: %s",
+			config.name,
+			len(scan_result["duplicate_keys"]),
+		)
+
+	return {
+		"dataset": config.name,
+		"dry_run": dry_run,
+		"files_scanned": scan_result["files_scanned"],
+		"files_indexed": len(files_by_key),
+		"parse_errors": len(scan_result["parse_errors"]),
+		"duplicate_file_keys": len(scan_result["duplicate_keys"]),
+		"existing_file_keys": len(existing_keys),
+		"actual_file_keys": len(actual_keys),
+		"kept_file_keys": len(existing_keys & actual_keys),
+		"added_file_keys": len(actual_keys - existing_keys),
+		"removed_file_keys": len(existing_keys - actual_keys),
+		"invalid_existing_file_rows": invalid_file_rows,
+		"preserved_nonfile_rows": len(nonfile_rows),
+		"combined_output_rows": len(combined_output_rows),
+		"split_output_rows": {
+			split_name: len(split_output_rows[split_name]) for split_name in SPLITS
+		},
+		"combined_metadata_path": str(combined_path),
+		"split_metadata_paths": {
+			split_name: str(split_paths[split_name]) for split_name in SPLITS
+		},
+		"backups": backups,
+	}
+
 def run():
 	args = parse_args()
 	setup_logging(args.log_level)
@@ -191,6 +297,18 @@ def run():
 	logging.info("Base directory: %s", base_dir)
 	logging.info("Datasets selected: %s", selected)
 
+	for dataset_name in selected:
+		config = DATASET_CONFIGS[dataset_name]
+		summary = reconcile_dataset(
+			config=config,
+			base_dir=base_dir,
+			dry_run=args.dry_run,
+			keep_nonfile_rows=keep_nonfile_rows,
+			backup_enabled=backup_enabled,
+		)
+		log_dataset_summary(summary)
+
+	logging.info("Metadata reconciliation complete.")
 
 if __name__ == "__main__":
 	run()
