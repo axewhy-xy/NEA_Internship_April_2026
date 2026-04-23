@@ -390,6 +390,22 @@ def scan_split_files(config, base_dir):
 		"duplicate_keys": duplicate_keys,
 	}
 
+def normalize_row(row, columns):
+	normalized = {column: "" for column in columns}
+	for column in columns:
+		normalized[column] = string_value(row.get(column, ""))
+	return normalized
+
+def select_best_row(current_row, candidate_row, columns):
+	if current_row is None:
+		return candidate_row
+
+	if row_score(candidate_row, columns) > row_score(current_row, columns):
+		return candidate_row
+
+	return current_row
+
+
 def build_context_by_key(config, existing_rows):
 	context_by_key = {}
 	invalid_file_rows = 0
