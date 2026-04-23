@@ -33,47 +33,47 @@ from typing import Dict, List, Optional, Tuple
 # ----------------------------------------------------------------------------------------------------
 # Defaults / constants
 # ----------------------------------------------------------------------------------------------------
-SPLITS                                      = ("train", "valid", "test")
-SPLIT_ORDER                                 = {"train": 0, "valid": 1, "test": 2}
-SUPPORTED_IMAGE_EXTENSIONS                  = {".jpg", ".jpeg", ".png", ".webp"}
+SPLITS                                              = ("train", "valid", "test")
+SPLIT_ORDER                                         = {"train": 0, "valid": 1, "test": 2}
+SUPPORTED_IMAGE_EXTENSIONS                          = {".jpg", ".jpeg", ".png", ".webp"}
 
-STREET_COLUMNS                              = (
-                                            "id",
-                                            "lat",
-                                            "lon",
-                                            "postal_code",
-                                            "label",
-                                            "split",
-                                            "heading",
-                                            "pitch",
-                                            "fov",
-                                            "size",
-                                            "pano_id",
-                                            "capture_date",
-                                            "status",
-                                            "path",
-                                            "error",
-                                        )
+STREET_COLUMNS                                      = (
+                                                    "id",
+                                                    "lat",
+                                                    "lon",
+                                                    "postal_code",
+                                                    "label",
+                                                    "split",
+                                                    "heading",
+                                                    "pitch",
+                                                    "fov",
+                                                    "size",
+                                                    "pano_id",
+                                                    "capture_date",
+                                                    "status",
+                                                    "path",
+                                                    "error",
+                                                )
 
-MAP_COLUMNS                                 = (
-                                            "id",
-                                            "lat",
-                                            "lon",
-                                            "postal_code",
-                                            "label",
-                                            "split",
-                                            "map_type",
-                                            "zoom",
-                                            "tile_x",
-                                            "tile_y",
-                                            "tile_width",
-                                            "tile_height",
-                                            "image_format",
-                                            "session_id",
-                                            "status",
-                                            "path",
-                                            "error",
-                                        )
+MAP_COLUMNS                                         = (
+                                                    "id",
+                                                    "lat",
+                                                    "lon",
+                                                    "postal_code",
+                                                    "label",
+                                                    "split",
+                                                    "map_type",
+                                                    "zoom",
+                                                    "tile_x",
+                                                    "tile_y",
+                                                    "tile_width",
+                                                    "tile_height",
+                                                    "image_format",
+                                                    "session_id",
+                                                    "status",
+                                                    "path",
+                                                    "error",
+                                                )
 
 STREET_FILENAME_PATTERN = re.compile(
 	r"^(?P<id>.+)_(?P<split>train|valid|test)_h(?P<heading>-?\d+)_p(?P<pitch>-?\d+)_f(?P<fov>-?\d+)\.(?P<ext>[A-Za-z0-9]+)$",
