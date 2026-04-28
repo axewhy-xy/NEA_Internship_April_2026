@@ -13,7 +13,7 @@ The outcome of the project would be a labelled dataset with structural and archi
 6. [X] - Write an alogrithm/script to extract Satellite Tile and retrieve the images of the chosen location.
 7. [X] - Define what is the scope of 'feature extraction' in the context of this project, and determine the methodology for achieving the project outcome. This would include discussing whether transfer learning can be utilised, and if so, which pre-trained models would be suitable for the task at hand. If transfer learning is not permitted, then there would be a need to discuss the specific features that need to be extracted from the images, and the methods for extracting those features from scratch.
 8. [X] - Write an algorithm/script to augment the dataset using techniques such as rotation, flipping, scaling, etc. to increase the diversity of the dataset and improve the performance of the model.
-9. [ ] - Scrutinise the augmented dataset and discard any images that are too distorted or do not accurately represent the features of the HDB buildings that are relevant to mosquito activity.
+9. [X] - Scrutinise the augmented dataset and discard any images that are too distorted or do not accurately represent the features of the HDB buildings that are relevant to mosquito activity.
 10. [ ] - Label the dataset with the relevant features for training a pre-trained model.
 11. [ ] - Download and set up the pre-trained model locally (e.g., ResNet-50) for feature extraction.
 12. [ ] - Train the pre-trained model on the labelled dataset to extract the relevant features from the images.
