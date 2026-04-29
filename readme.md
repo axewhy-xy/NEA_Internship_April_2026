@@ -19,6 +19,17 @@ The outcome of the project would be a labelled dataset with structural and archi
 12. [ ] - Train the pre-trained model on the labelled dataset to extract the relevant features from the images.
 13. [ ] - Evaluate the performance of the model and analyze which data augmentation techniques are most effective for improving the model's performance without compromising the integrity of the features being extracted.
 
+## Completed Tasks:
+1. Set up environment for Google Earth Engine API for satellite imagery
+2. Write an algorithm/script using the GEE API to retrieve satellite imagery.
+3. Set up the environment for the Google Maps Street View API for close-up imagery/street view images of HDB buildings.
+4. Write an algorithm/script using the Google Maps Street View API to retrieve street views of HDB buildings.
+5. Set up enviroment for Google Map Tile API to obtain a Satellite Tile of the chosen location
+6. Write an alogrithm/script to extract Satellite Tile and retrieve the images of the chosen location.
+7. Write an algorithm using the OneMap API to convert postal address codes into latitude and longitude coordinates.
+8. Write an algorithm for data augmentation using techniques such as rotation, flipping, scaling, etc. to increase the diversity of the dataset and improve the performance of the model.
+9. Write a script to automatically read, check and update the metadata entries based on the changes made to the dataset. This script can be run on demand, allowing for manual user-based control whenever there is a need to update the metadata.
+
 ## Deprecated Tasks:
 1.  Write an algorithm/script to extract the relevant features from the retrieved images using image processing techniques such as edge detection, corner detection, etc.
 Reason for deprecation: After consulting with the project supervisor, it was clarified that transfer learning is permitted for this project. Therefore, there is no need to work on extracting features like edge detection, corner detection, etc. from scratch. Instead, the task would then be updated to just dataset augmentation and labelling of the dataset to pass into the pre-trained model.
