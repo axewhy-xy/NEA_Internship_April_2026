@@ -1,7 +1,7 @@
-### Project Title: Automated Feature Extraction and Quantification System in HDB Residential Buildings for Wolbachia Technology Optimisation
+# Project Title: Automated Feature Extraction and Quantification System in HDB Residential Buildings for Wolbachia Technology Optimisation
 Project Description: This study aims to identify HDB structures and estimate their impact on the wild-type mosquito population size and the efficacy of Wolbachia-Aedes releases.
 
-### Project Outcome:
+## Project Outcome:
 The outcome of the project would be a labelled dataset with structural and architectural features relevant to mosquito activity. The dataset is to be extracted using image processing and computer vision, validated for accuracy and cleaned for fitting causal machine learning model.
 
 ## Planned Tasked/TODO:
