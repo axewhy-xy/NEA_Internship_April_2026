@@ -36,7 +36,7 @@ Reason for deprecation: After consulting with the project supervisor, it was cla
 
 ## Problems Encountered: (Title: (date) [Complexity] [Status])
 ### 1. Low satellite imagery resolution: (2026-04-13) [Moderate] [Resolved]
-     While using Google Earth Engine API (GEE), one main problem encountered was the resolution of the satellite image. The root cause is the bottlenecking of using a dataset from Sentinel-2 SR, which has a 10m resolution for RGB bands. While the output image captures enough context around the selected coordinates/postal code, it is rather difficult to get a clear image of the HDB roofings for dataset labelling.
+While using Google Earth Engine API (GEE), one main problem encountered was the resolution of the satellite image. The root cause is the bottlenecking of using a dataset from Sentinel-2 SR, which has a 10m resolution for RGB bands. While the output image captures enough context around the selected coordinates/postal code, it is rather difficult to get a clear image of the HDB roofings for dataset labelling.
 
 ### 2. Converting postal codes to latitude and longitude: (2026-04-14) [Low] [Resolved]
 The extraction script currently only takes in latitude and longtitude to get the image of the specific location. However, there is a need to figure out a method in order to convert postal address codes into the coordinate system, as most of the given data are in the form of postal code addresses.
