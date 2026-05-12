@@ -29,6 +29,7 @@ The outcome of the project would be a labelled dataset with structural and archi
 7. Write an algorithm using the OneMap API to convert postal address codes into latitude and longitude coordinates.
 8. Write an algorithm for data augmentation using techniques such as rotation, flipping, scaling, etc. to increase the diversity of the dataset and improve the performance of the model.
 9. Write a script to automatically read, check and update the metadata entries based on the changes made to the dataset. This script can be run on demand, allowing for manual user-based control whenever there is a need to update the metadata.
+10. Implement a sorting/checking algorithm to check for similar images in the train, validation and test sets to ensure that there aren't any similar augmented images between the different sets, which could potentially lead to a case of overfitting the model.
 
 ## Deprecated Tasks:
 ### 1.  Write an algorithm/script to extract the relevant features from the retrieved images using image processing techniques such as edge detection, corner detection, etc.
