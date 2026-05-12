@@ -36,31 +36,31 @@ The outcome of the project would be a labelled dataset with structural and archi
 Reason for deprecation: After consulting with the project supervisor, it was clarified that transfer learning is permitted for this project. Therefore, there is no need to work on extracting features like edge detection, corner detection, etc. from scratch. Instead, the task would then be updated to just dataset augmentation and labelling of the dataset to pass into the pre-trained model.
 
 ## Problems Encountered: (Title: (date) [Complexity] [Status])
-### 1. Low satellite imagery resolution: (2026-04-13) <span style="color:yellow;">[Moderate]</span><span style="color:green;"> [Resolved]</span>
+### 1. Low satellite imagery resolution: (2026-04-13) [Moderate] [Resolved]
 While using Google Earth Engine API (GEE), one main problem encountered was the resolution of the satellite image. The root cause is the bottlenecking of using a dataset from Sentinel-2 SR, which has a 10m resolution for RGB bands. While the output image captures enough context around the selected coordinates/postal code, it is rather difficult to get a clear image of the HDB roofings for dataset labelling.
 
-### 2. Converting postal codes to latitude and longitude: (2026-04-14) <span style="color:green;">[Low] [Resolved]</span>
+### 2. Converting postal codes to latitude and longitude: (2026-04-14) [Low] [Resolved]
 The extraction script currently only takes in latitude and longtitude to get the image of the specific location. However, there is a need to figure out a method in order to convert postal address codes into the coordinate system, as most of the given data are in the form of postal code addresses.
 
-### 3. Unclear project objective: (2026-04-20) <span style="color:red;">[High]</span><span style="color:green;"> [Resolved]</span>
+### 3. Unclear project objective: (2026-04-20) [High] [Resolved]
 The project's purpose is unclear; there is a need to clarify the definition of feature extraction in the scope. Does 'feature extraction' mean HDB architectural features or does it mean the technical term 'feature extraction' in image processing? If it's the latter, then there will be a need to consult the methodology of achieving the project outcome. For instance, is it possible to utilise the concept of transfer learning using pre-existing models like ResNet-50 to aid with the feature extraction? If utilising transfer learning is permitted, then there is no need to work on extracting features like edge detection, corner detection, etc. from scratch. Instead, the task would then be updated to just dataset augmentation and labelling of the dataset to pass into the pre-trained model.
 
-### 4. Data augmentation techniques: (2026-04-21) <span style="color:yellow;">[Moderate]</span><span style="color:green;"> [Resolved]</span>
+### 4. Data augmentation techniques: (2026-04-21) [Moderate] [Resolved]
 While there are many data augmentation techniques available, there is a need to determine which techniques would be suitable for this project. For instance, while rotation and flipping could potentially work, scaling might not be a good idea as it could distort the features of the HDB buildings. There is a need to research and experiment with different data augmentation techniques to determine which ones would be most effective for improving the performance of the model without compromising the integrity of the features being extracted.
 
-### 5. Long manual labelling time: (2026-04-22) <span style="color:green;">[Low]</span> <span style="color:yellow;"> [Ongoing]</span>
+### 5. Long manual labelling time: (2026-04-22) [Low] [Ongoing]
 As of the current data (2026-04-22), there are a total of 6792 augmented images that need to be labelled with the relevant features for training the pre-trained model. To add to that, there is a possibility that some of the augmented images may need to be discarded if the features are too distorted, which would add more time to the labelling process. While there is no solution to this issue, it is important to note that the labelling process is crucial for the success of the project, as it directly impacts the performance of the model. Therefore, it is necessary to allocate sufficient time and resources for the labelling process to ensure that the dataset is accurately labelled and of high quality for training the model.
 
-### 6. Label-Studio Limit's dataset uploading capacity: (2026-04-22) <span style="color:green;">[Low] [Resolved]</span>
+### 6. Label-Studio Limit's dataset uploading capacity: (2026-04-22) [Low] [Resolved]
 While using label studio for labelling the dataset, there is a need to upload the dataset into the software. However, label-studio has a limit on the dataset size that can be uploaded, which is around 100 images per instance/project. This poses a problem as the current dataset contains 6792 augmented images, which exceeds the upload limit of label-studio. This issue could potentially be solved by breaking down the dataset into smaller batches and uploading them separately into label-studio for labelling. However, this would require more time and effort to manage the different batches of data and ensure that they are labelled consistently across all batches.
 
-### 7. Updating of dataset's metadata: (2026-04-23) <span style="color:green;">[Low] [Resolved]</span>
+### 7. Updating of dataset's metadata: (2026-04-23) [Low] [Resolved]
 While labelling and scrutinising the dataset, there is a need to update the metadata of the dataset to ensure that it accurately reflects the data contained within it. The problem could be solved manually by updating the metadata file entries one by one, but this would be a time-consuming process. Moreover, there is a risk of human error when manually updating the metadata, which could lead to inaccuracies in the metadata entries.
 
-### 8. Unclear architectural features to extract: (2026-04-28) <span style="color:red;">[High]</span> <span style="color:green;">[Resolved]</span>
+### 8. Unclear architectural features to extract: (2026-04-28) [High] [Resolved]
 Before the labelling process can begin, there is a need to clarify and discuss with the project supervisor on the specific architectural features of HDB buildings that are considered relevant to mosquito activity and should be labelled in the dataset. This is crucial as it would directly impact the performance of the model, and labelling irrelevant features could lead to a decrease in model performance. Therefore, it is important to have a clear understanding of which features are relevant and should be labelled in the dataset before proceeding with the labelling process.
 
-### 9. Potential Similarity of Augmented Images: (2026-04-29) <span style="color:red;">[High]</span> <span style="color:yellow;">[Ongoing]</span>
+### 9. Potential Similarity of Augmented Images: (2026-04-29) [High] [Resolved]
 While labelling the dataset, there is a possibility that some of the augmented images are similar to each other in the train, validation and test set, which could potentially lead to a case of overfitting the model.
 
 ## Mitigation/Solution:
