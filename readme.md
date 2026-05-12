@@ -60,7 +60,7 @@ While labelling and scrutinising the dataset, there is a need to update the meta
 ### 8. Unclear architectural features to extract: (2026-04-28) [High] [Resolved]
 Before the labelling process can begin, there is a need to clarify and discuss with the project supervisor on the specific architectural features of HDB buildings that are considered relevant to mosquito activity and should be labelled in the dataset. This is crucial as it would directly impact the performance of the model, and labelling irrelevant features could lead to a decrease in model performance. Therefore, it is important to have a clear understanding of which features are relevant and should be labelled in the dataset before proceeding with the labelling process.
 
-### 9. Potential Similarity of Augmented Images: (2026-04-29) [High] [Resolved]
+### 9. Potential Similarity of Augmented Images: (2026-05-12) [High] [Resolved]
 While labelling the dataset, there is a possibility that some of the augmented images are similar to each other in the train, validation and test set, which could potentially lead to a case of overfitting the model.
 
 ## Mitigation/Solution:
@@ -88,7 +88,7 @@ To mitigate this issue, one solution could be to create a script that can automa
 ### 8. Unclear architectural features to extract: (2026-04-28)
 To mitigate this issue, there is a need to clarify and discuss with the project supervisor on the specific architectural features of HDB buildings that are considered relevant to mosquito activity and should be labelled in the dataset. This discussion would be crucial in determining the direction of the project and ensuring that the labelling process is aligned with the project objectives. It would be important to have a clear understanding of which features are relevant and should be labelled in the dataset before proceeding with the labelling process, as this would directly impact the performance of the model. By having a clear understanding of the relevant features, it will be possible to ensure that the dataset is accurately labelled and of high quality for training the model, ultimately contributing to the success of the project. The tool used for labelling the dataset (label-studio) has been set up and is ready to be used for labelling the dataset once the relevant features have been clarified and defined.
 
-### 9. Potential Similarity of Augmented Images: (2026-04-29)
+### 9. Potential Similarity of Augmented Images: (2026-05-12)
 To mitigate this issue, it would be ideal to implement a sorting/checking algorithm to check for similar images in the train, validation and test set. This would help to ensure that there isn't any similar augmented images between the different train/validation and test sets, which could potentially lead to a case of overfitting the model. By implementing this solution, it will be possible to ensure that the model is trained on a diverse set of images, which would help to improve its generalization performance and reduce the risk of overfitting.
 
 ## Problem Resolution:
