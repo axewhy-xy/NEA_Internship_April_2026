@@ -22,10 +22,71 @@ import json
 import os
 import sys
 
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+_IMAGE_INDEX_CACHE = {}
+
 def _to_posix_path(path_text):
 	if isinstance(path_text, str):
 		return path_text.replace("\\", "/")
 	return path_text
+
+def _get_image_index(root_dir):
+	root_abs = os.path.abspath(root_dir)
+	cache_key = os.path.normcase(root_abs)
+	if cache_key in _IMAGE_INDEX_CACHE:
+		return _IMAGE_INDEX_CACHE[cache_key]
+
+	index = {}
+	if os.path.isdir(root_abs):
+		for walk_root, dirs, files in os.walk(root_abs):
+			dirs.sort()
+			files.sort()
+			for name in files:
+				extension = os.path.splitext(name)[1].lower()
+				if extension not in _IMAGE_EXTENSIONS:
+					continue
+				if name in index:
+					continue
+				index[name] = os.path.join(walk_root, name)
+
+	_IMAGE_INDEX_CACHE[cache_key] = index
+	return index
+
+def _find_existing_image_path(file_name, json_dir):
+	if not isinstance(file_name, str):
+		return None
+
+	file_name_os = file_name.replace("/", os.sep).replace("\\", os.sep)
+	base_name = os.path.basename(file_name_os)
+	if not base_name:
+		return None
+
+	candidate_paths = []
+	if os.path.isabs(file_name_os):
+		candidate_paths.append(file_name_os)
+	else:
+		candidate_paths.append(os.path.join(json_dir, file_name_os))
+
+	parts = [part for part in file_name.replace("\\", "/").split("/") if part and part != "."]
+	lower_parts = [part.lower() for part in parts]
+	if "images" in lower_parts:
+		images_idx = lower_parts.index("images")
+		tail = parts[images_idx + 1 :]
+		if tail:
+			candidate_paths.append(os.path.join(json_dir, "images", *tail))
+	candidate_paths.append(os.path.join(json_dir, "images", base_name))
+	candidate_paths.append(os.path.join(os.path.dirname(json_dir), "images", base_name))
+
+	for candidate in candidate_paths:
+		if os.path.exists(candidate):
+			return os.path.abspath(candidate)
+
+	for lookup_root in (json_dir, os.path.dirname(json_dir)):
+		resolved = _get_image_index(lookup_root).get(base_name)
+		if resolved:
+			return os.path.abspath(resolved)
+
+	return None
 
 '''
 # ----------------------------------------------------------------------------------------------------
@@ -60,7 +121,9 @@ def _normalize_file_name(file_name, mode, json_dir, relative_root):
 		return _to_posix_path(base_name)
 
 	if mode == "relative":
-		image_path = os.path.join(json_dir, "images", base_name)
+		image_path = _find_existing_image_path(file_name, json_dir)
+		if image_path is None:
+			image_path = os.path.join(json_dir, "images", base_name)
 		return _to_posix_path(os.path.relpath(image_path, relative_root))
 
 	return _to_posix_path(file_name)
@@ -414,8 +477,13 @@ def main():
 
 	result_files = _discover_result_files(input_dir, args.pattern, output_json)
 	if not result_files:
-		print("No matching JSON files found.")
-		return 1
+		pattern_path = os.path.join(input_dir, args.pattern)
+		if os.path.normcase(os.path.abspath(pattern_path)) == os.path.normcase(output_json) and os.path.exists(output_json):
+			print("No source JSON files found. Reusing the existing output JSON for normalization.")
+			result_files = [output_json]
+		else:
+			print("No matching JSON files found.")
+			return 1
 
 	output, stats = collate_coco_json(
 		result_files, args.file_name_mode, args.sort_images, input_dir
@@ -432,7 +500,7 @@ def main():
 		if not isinstance(file_name, str):
 			continue
 		total_images += 1
-		candidate = os.path.join(input_dir, file_name)
+		candidate = file_name if os.path.isabs(file_name) else os.path.join(input_dir, file_name)
 		if os.path.exists(candidate):
 			resolved_images += 1
 
