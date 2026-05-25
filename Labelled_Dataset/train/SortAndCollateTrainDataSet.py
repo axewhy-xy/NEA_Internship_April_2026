@@ -24,6 +24,60 @@ import sys
 
 '''
 # ----------------------------------------------------------------------------------------------------
+# parse_args()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function parses command-line arguments for the script. It sets up an argument parser with options
+for specifying the input directory, output JSON file, filename pattern, file name normalization mode, 
+and whether to sort images. The function returns the parsed arguments as a namespace object.
+
+Arguments:
+None. This function does not take any arguments directly, but it processes command-line arguments
+when the script is executed.
+
+Returns:
+None. The function returns a namespace object containing the parsed command-line arguments.
+
+'''
+def parse_args():
+	parser = argparse.ArgumentParser(
+		description="Collate multiple COCO JSON exports into a single dataset."
+	)
+	default_input = os.path.dirname(os.path.abspath(__file__))
+	parser.add_argument(
+		"-i",
+		"--input-dir",
+		default=default_input,
+		help="Root folder containing label-studio export subfolders.",
+	)
+	parser.add_argument(
+		"-o",
+		"--output-json",
+		default=None,
+		help="Output JSON file path. Defaults to <input-dir>/result.json.",
+	)
+	parser.add_argument(
+		"--pattern",
+		default="result.json",
+		help="Filename pattern to search for (default: result.json).",
+	)
+	parser.add_argument(
+		"--file-name-mode",
+		choices=["keep", "basename", "relative"],
+		default="keep",
+		help="How to rewrite image file_name fields in the output JSON.",
+	)
+	parser.add_argument(
+		"--no-sort",
+		dest="sort_images",
+		action="store_false",
+		help="Preserve input ordering instead of sorting images by file name.",
+	)
+	parser.set_defaults(sort_images=True)
+	return parser.parse_args()
+
+'''
+# ----------------------------------------------------------------------------------------------------
 # main()
 # ----------------------------------------------------------------------------------------------------
 Description:
