@@ -25,11 +25,41 @@ import sys
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 _IMAGE_INDEX_CACHE = {}
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# _to_posix_path()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function converts a given file path to a POSIX-style path by replacing backslashes with forward 
+slashes. This is useful for ensuring consistent path formatting across different operating systems.
+
+Arguments:
+path_text: The original file path as a string.
+
+Returns:
+The converted file path in POSIX format, where backslashes are replaced with forward slashes.
+"""
 def _to_posix_path(path_text):
 	if isinstance(path_text, str):
 		return path_text.replace("\\", "/")
 	return path_text
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# _get_image_index()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function retrieves an index of image file names to their absolute paths for a given root directory. It
+walks through the directory tree starting from the root directory and collects all files that have extensions
+matching the defined image extensions. The function uses a cache to avoid redundant indexing for the same directory.
+
+Arguments:
+root_dir: The root directory from which to start indexing image files.
+
+Returns:
+A dictionary mapping image file names (in lowercase) to their absolute paths. The keys are normalized to ensure
+case-insensitive matching of file names.
+"""
 def _get_image_index(root_dir):
 	root_abs = os.path.abspath(root_dir)
 	cache_key = os.path.normcase(root_abs)
@@ -52,6 +82,24 @@ def _get_image_index(root_dir):
 	_IMAGE_INDEX_CACHE[cache_key] = index
 	return index
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# _find_existing_image_path()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function attempts to find an existing image file path based on a given file name and a reference 
+JSON directory. It generates candidate paths by considering the original file name, potential relative
+paths based on the JSON directory, and common "images" subdirectory structures. It also checks against 
+an indexed collection of image files under the JSON directory. The function returns the absolute path 
+of the first existing image file that matches any of the candidate paths.
+
+Arguments:
+file_name: The original file name to search for.
+json_dir: The directory of the JSON file, used as a reference for generating candidate paths.
+
+Returns:
+The absolute path of the existing image file if found, or None if no matching file is found.
+"""
 def _find_existing_image_path(file_name, json_dir):
 	if not isinstance(file_name, str):
 		return None
