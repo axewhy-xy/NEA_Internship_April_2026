@@ -14,7 +14,7 @@ The outcome of the project would be a labelled dataset with structural and archi
 7. [X] - Define what is the scope of 'feature extraction' in the context of this project, and determine the methodology for achieving the project outcome. This would include discussing whether transfer learning can be utilised, and if so, which pre-trained models would be suitable for the task at hand. If transfer learning is not permitted, then there would be a need to discuss the specific features that need to be extracted from the images, and the methods for extracting those features from scratch.
 8. [X] - Write an algorithm/script to augment the dataset using techniques such as rotation, flipping, scaling, etc. to increase the diversity of the dataset and improve the performance of the model.
 9. [X] - Scrutinise the augmented dataset and discard any images that are too distorted or do not accurately represent the features of the HDB buildings that are relevant to mosquito activity.
-10. [ ] - Label the dataset with the relevant features for training a pre-trained model.
+10. [X] - Label the dataset with the relevant features for training a pre-trained model.
 11. [ ] - Download and set up the pre-trained model locally (e.g., ResNet-50) for feature extraction.
 12. [ ] - Train the pre-trained model on the labelled dataset to extract the relevant features from the images.
 13. [ ] - Evaluate the performance of the model and analyze which data augmentation techniques are most effective for improving the model's performance without compromising the integrity of the features being extracted.
@@ -30,6 +30,7 @@ The outcome of the project would be a labelled dataset with structural and archi
 8. Write an algorithm for data augmentation using techniques such as rotation, flipping, scaling, etc. to increase the diversity of the dataset and improve the performance of the model.
 9. Write a script to automatically read, check and update the metadata entries based on the changes made to the dataset. This script can be run on demand, allowing for manual user-based control whenever there is a need to update the metadata.
 10. Implement a sorting/checking algorithm to check for similar images in the train, validation and test sets to ensure that there aren't any similar augmented images between the different sets, which could potentially lead to a case of overfitting the model.
+11. Create a script to collate all the labelled data's results into a single metadata file. This script reads the labelled data from each batch, extracts the relevant information, and then combines it into a single metadata file in a structured format (e.g., CSV, JSON).
 
 ## Deprecated Tasks:
 ### 1.  Write an algorithm/script to extract the relevant features from the retrieved images using image processing techniques such as edge detection, corner detection, etc.
@@ -48,7 +49,7 @@ The project's purpose is unclear; there is a need to clarify the definition of f
 ### 4. Data augmentation techniques: (2026-04-21) [Moderate] [Resolved]
 While there are many data augmentation techniques available, there is a need to determine which techniques would be suitable for this project. For instance, while rotation and flipping could potentially work, scaling might not be a good idea as it could distort the features of the HDB buildings. There is a need to research and experiment with different data augmentation techniques to determine which ones would be most effective for improving the performance of the model without compromising the integrity of the features being extracted.
 
-### 5. Long manual labelling time: (2026-04-22) [Low] [Ongoing]
+### 5. Long manual labelling time: (2026-04-22) [Low] [Resolved]
 As of the current data (2026-04-22), there are a total of 6792 augmented images that need to be labelled with the relevant features for training the pre-trained model. To add to that, there is a possibility that some of the augmented images may need to be discarded if the features are too distorted, which would add more time to the labelling process. While there is no solution to this issue, it is important to note that the labelling process is crucial for the success of the project, as it directly impacts the performance of the model. Therefore, it is necessary to allocate sufficient time and resources for the labelling process to ensure that the dataset is accurately labelled and of high quality for training the model.
 
 ### 6. Label-Studio Limit's dataset uploading capacity: (2026-04-22) [Low] [Resolved]
@@ -62,6 +63,9 @@ Before the labelling process can begin, there is a need to clarify and discuss w
 
 ### 9. Potential Similarity of Augmented Images: (2026-05-12) [High] [Resolved]
 While labelling the dataset, there is a possibility that some of the augmented images are similar to each other in the train, validation and test set, which could potentially lead to a case of overfitting the model.
+
+### 10. Collating Labelled Dataset: (2026-05-25) [Moderate] [Resolved]
+After the labelling process is completed, there is a need to collate all the labelled data's results into a single metadata. This is because the labelled dataset would be in different batches due to the need to break down the dataset into smaller batches for labelling, and it would be necessary to combine all the labelled data into a single metadata file for training the model. 
 
 ## Mitigation/Solution:
 ### 1. Low satellite imagery resolution: (2026-04-13)
@@ -91,6 +95,9 @@ To mitigate this issue, there is a need to clarify and discuss with the project 
 ### 9. Potential Similarity of Augmented Images: (2026-05-12)
 To mitigate this issue, it would be ideal to implement a sorting/checking algorithm to check for similar images in the train, validation and test set. This would help to ensure that there isn't any similar augmented images between the different train/validation and test sets, which could potentially lead to a case of overfitting the model. By implementing this solution, it will be possible to ensure that the model is trained on a diverse set of images, which would help to improve its generalization performance and reduce the risk of overfitting.
 
+### 10. Collating Labelled Dataset: (2026-05-25)
+To mitigate this issue, there is a need to create a script that can collate all the labelled data's results into a single metadata file. This would help to ensure that all the labelled data from the different batches is combined into a single metadata file for training the model. The script could be designed to read the labelled data from each batch, extract the relevant information, and then combine it into a single metadata file in a structured format (e.g., CSV, JSON). By implementing this solution, it will be possible to efficiently manage and organize the labelled dataset, ensuring that it is ready for training the model and ultimately contributing to the success of the project. Another possible solution could be to manually collate the labelled data into a single metadata file. However, this would be a time-consuming process and there is a risk of human error when manually collating the data, which could lead to inaccuracies in the metadata file. Therefore, creating a script to automate this process would be a more efficient and reliable solution.
+
 ## Problem Resolution:
 ### 1. Low satellite imagery resolution:
 Retrieved images by using Google Map Tile API instead. The image was retrieved using the satellite tile by calling the Google Map Tile API, which provided a much clearer image of the HDB roofings, allowing for better labelling of the dataset.
@@ -118,3 +125,6 @@ After consulting with the project supervisor, it was clarified thatthe specific 
 
 ### 9. Potential Similarity of Augmented Images:
 To address the issue of potential similarity of augmented images between the train, validation and test sets, a sorting/checking algorithm was implemented to check for similar images in the different sets. This algorithm helps to ensure that there aren't any similar augmented images between the different train/validation and test sets, which could potentially lead to a case of overfitting the model. By implementing this solution, it became possible to ensure that the model is trained on a diverse set of images, which would help to improve its generalization performance and reduce the risk of overfitting. This step is crucial in ensuring that the model can effectively learn from the data and perform well on unseen data, ultimately contributing to the success of the project.
+
+### 10. Collating Labelled Dataset:
+To collate all the labelled data's results into a single metadata file, a script was created to automate this process. This script reads the labelled data from each batch, extracts the relevant information, and then combines it into a single metadata file in a structured format (e.g., CSV, JSON). By implementing this solution, it became possible to efficiently manage and organize the labelled dataset, ensuring that it is ready for training the model and ultimately contributing to the success of the project. This automated approach to collating the labelled dataset also helps to save time and reduce the risk of human error when manually collating the data, ensuring that the metadata file is accurate and comprehensive for training the model.
