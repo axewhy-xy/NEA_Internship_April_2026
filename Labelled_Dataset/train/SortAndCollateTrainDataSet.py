@@ -24,6 +24,42 @@ import sys
 
 '''
 # ----------------------------------------------------------------------------------------------------
+# _discover_result_files()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function discovers all JSON files in the specified input directory that match the given filename
+pattern. It walks through the directory tree and allocates the paths of the matching files, while also
+ensuring that the output JSON file (if specified) is not included in the list of result files. The function
+returns a sorted list of the discovered JSON file paths.
+
+Arguments:
+input_dir: The directory to search for JSON files.
+pattern: The filename pattern to match.
+output_json: The path to the output JSON file (if specified).
+
+Returns:
+A sorted list of the discovered JSON file paths.
+
+'''
+def _discover_result_files(input_dir, pattern, output_json):
+	output_abs = None
+	if output_json:
+		output_abs = os.path.normcase(os.path.abspath(output_json))
+
+	result_files = []
+	for root, _, files in os.walk(input_dir):
+		if pattern not in files:
+			continue
+		path = os.path.normcase(os.path.abspath(os.path.join(root, pattern)))
+		if output_abs and path == output_abs:
+			continue
+		result_files.append(path)
+
+	result_files.sort()
+	return result_files
+
+'''
+# ----------------------------------------------------------------------------------------------------
 # parse_args()
 # ----------------------------------------------------------------------------------------------------
 Description:
