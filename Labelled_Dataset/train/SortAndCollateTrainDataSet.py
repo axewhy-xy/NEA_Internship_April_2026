@@ -60,6 +60,150 @@ def _discover_result_files(input_dir, pattern, output_json):
 
 '''
 # ----------------------------------------------------------------------------------------------------
+# collate_coco_json()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function collates multiple COCO JSON files into a single dataset. It processes each JSON file to 
+extract images, annotations, and categories, while ensuring that category IDs are consistent across files.
+It also normalizes image file names based on the specified mode and sorts images and annotations if required.
+The function returns the collated dataset as a dictionary and statistics about any skipped images or annotations.
+
+Arguments:
+result_files: A list of file paths to the COCO JSON files that need to be collated.
+file_name_mode: The mode for normalizing image file names ("keep", "basename", or "relative").
+sort_images: A boolean indicating whether to sort images by file name.
+relative_root: The root directory for calculating relative paths, used for relative file name mode.
+
+Returns:
+The collated dataset as a dictionary containing "images", "categories", and "annotations" keys,
+along with a statistics dictionary that includes counts of skipped images, skipped annotations, and
+missing image references in annotations.
+
+'''
+def collate_coco_json(result_files, file_name_mode, sort_images, relative_root):
+	canonical_categories = []
+	canonical_by_name = {}
+	image_records = []
+	annotation_records = []
+
+	info_block = None
+	licenses_block = None
+
+	image_index = 0
+	annotation_index = 0
+	skipped_images = 0
+	skipped_annotations = 0
+
+	for path in result_files:
+		data = _load_json(path)
+		if info_block is None and "info" in data:
+			info_block = data["info"]
+		if licenses_block is None and "licenses" in data:
+			licenses_block = data["licenses"]
+
+		file_category_map = _update_categories(
+			data.get("categories", []), canonical_by_name, canonical_categories
+		)
+
+		json_dir = os.path.dirname(path)
+		for image in data.get("images", []):
+			original_id = image.get("id")
+			if original_id is None:
+				skipped_images += 1
+				continue
+			image_copy = dict(image)
+			image_copy["file_name"] = _normalize_file_name(
+				image_copy.get("file_name"), file_name_mode, json_dir, relative_root
+			)
+			image_records.append(
+				{
+					"source_key": (path, original_id),
+					"source_index": image_index,
+					"image": image_copy,
+				}
+			)
+			image_index += 1
+
+		for annotation in data.get("annotations", []):
+			original_id = annotation.get("id")
+			image_id = annotation.get("image_id")
+			if image_id is None:
+				skipped_annotations += 1
+				continue
+			annotation_copy = dict(annotation)
+			category_id = annotation_copy.get("category_id")
+			if category_id in file_category_map:
+				annotation_copy["category_id"] = file_category_map[category_id]
+			annotation_records.append(
+				{
+					"source_key": (path, original_id),
+					"source_index": annotation_index,
+					"image_key": (path, image_id),
+					"annotation": annotation_copy,
+				}
+			)
+			annotation_index += 1
+
+	if sort_images:
+		image_records.sort(
+			key=lambda record: (
+				str(record["image"].get("file_name", "")).lower(),
+				record["source_index"],
+			)
+		)
+
+	image_id_map = {}
+	for new_id, record in enumerate(image_records):
+		record["image"]["id"] = new_id
+		image_id_map[record["source_key"]] = new_id
+
+	valid_annotations = []
+	missing_image_refs = 0
+	for record in annotation_records:
+		image_id = image_id_map.get(record["image_key"])
+		if image_id is None:
+			missing_image_refs += 1
+			continue
+		record["annotation"]["image_id"] = image_id
+		valid_annotations.append(record)
+
+	if sort_images:
+		valid_annotations.sort(
+			key=lambda record: (
+				record["annotation"].get("image_id", -1),
+				record["source_index"],
+			)
+		)
+	else:
+		valid_annotations.sort(key=lambda record: record["source_index"])
+
+	for new_id, record in enumerate(valid_annotations):
+		record["annotation"]["id"] = new_id
+
+	output = {
+		"images": [record["image"] for record in image_records],
+		"categories": sorted(
+			canonical_categories, key=lambda cat: cat.get("id", -1)
+		),
+		"annotations": [record["annotation"] for record in valid_annotations],
+	}
+
+	if info_block is not None:
+		output["info"] = info_block
+	if licenses_block is not None:
+		output["licenses"] = licenses_block
+
+	stats = {
+		"skipped_images": skipped_images,
+		"skipped_annotations": skipped_annotations,
+		"missing_image_refs": missing_image_refs,
+	}
+
+	return output, stats
+
+
+'''
+# ----------------------------------------------------------------------------------------------------
 # parse_args()
 # ----------------------------------------------------------------------------------------------------
 Description:
