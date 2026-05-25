@@ -24,6 +24,109 @@ import sys
 
 '''
 # ----------------------------------------------------------------------------------------------------
+# _normalize_file_name()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function normalizes the file name based on the specified mode. It can either keep the original file
+name, use only the base name, or create a relative path based on the JSON directory and a specified root.
+
+Arguments:
+file_name: The original file name to be normalized.
+mode: The mode of normalization. It can be "keep", "basename", or "relative
+json_dir: The directory of the JSON file, used for relative path mode.
+relative_root: The root directory for calculating relative paths, used for relative path mode.
+
+Returns:
+The normalized file name based on the specified mode.
+
+'''
+def _normalize_file_name(file_name, mode, json_dir, relative_root):
+	if not isinstance(file_name, str):
+		return file_name
+
+	if mode == "keep":
+		return file_name
+
+	base_name = os.path.basename(file_name)
+	if not base_name:
+		return file_name
+
+	if mode == "basename":
+		return base_name
+
+	if mode == "relative":
+		image_path = os.path.join(json_dir, "images", base_name)
+		return os.path.relpath(image_path, relative_root)
+
+	return file_name
+
+'''
+# ----------------------------------------------------------------------------------------------------
+# _next_category_id()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function calculates the next available category ID based on the existing categories. It checks the
+maximum ID among the existing categories and returns the next ID that can be used for a new category.
+
+Arguments:
+categories: A list of existing category dictionaries, each containing an "id" field.
+
+Returns:
+The next available category ID, which is one greater than the maximum existing ID
+If there are no existing categories, it returns 0.
+
+'''
+def _next_category_id(categories):
+	if not categories:
+		return 0
+	return max(cat.get("id", -1) for cat in categories) + 1
+
+'''
+# ----------------------------------------------------------------------------------------------------
+# _update_categories()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function updates the canonical category list with categories from a new JSON file. It checks for
+existing categories by name and either maps to the existing category ID or creates a new category with
+a unique ID. It returns a mapping from the original category IDs in the new JSON file to the canonical
+category IDs.
+
+Arguments:
+categories: A list of category dictionaries from the new JSON file, each containing at least a "name" field.
+canonical_by_name: A dictionary mapping category names to their canonical category dictionaries.
+canonical_categories: A list of canonical category dictionaries that have been collected so far.
+
+Returns:
+A dictionary mapping the original category IDs to the canonical category IDs.
+
+'''
+def _update_categories(categories, canonical_by_name, canonical_categories):
+	file_category_map = {}
+	for category in categories or []:
+		name = category.get("name")
+		if not name:
+			continue
+
+		if name in canonical_by_name:
+			canonical = canonical_by_name[name]
+			file_category_map[category.get("id")] = canonical.get("id")
+			continue
+
+		new_category = dict(category)
+		new_id = new_category.get("id")
+		existing_ids = {cat.get("id") for cat in canonical_categories}
+		if new_id in existing_ids or new_id is None:
+			new_id = _next_category_id(canonical_categories)
+
+		new_category["id"] = new_id
+		canonical_categories.append(new_category)
+		canonical_by_name[name] = new_category
+		file_category_map[category.get("id")] = new_id
+
+	return file_category_map
+
+'''
+# ----------------------------------------------------------------------------------------------------
 # _discover_result_files()
 # ----------------------------------------------------------------------------------------------------
 Description:
@@ -57,6 +160,26 @@ def _discover_result_files(input_dir, pattern, output_json):
 
 	result_files.sort()
 	return result_files
+
+'''
+# ----------------------------------------------------------------------------------------------------
+# _load_json()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function loads a JSON file from the specified path and returns the parsed data. It opens the file
+with UTF-8 encoding and uses the json module to parse the contents of the file. The function returns the
+resulting data structure, which is typically a dictionary representing the JSON content.
+
+Arguments:
+path: The file path to the JSON file that needs to be loaded.
+
+Returns:
+The parsed JSON data as a Python dictionary.
+
+'''
+def _load_json(path):
+	with open(path, "r", encoding="utf-8") as handle:
+		return json.load(handle)
 
 '''
 # ----------------------------------------------------------------------------------------------------
@@ -200,7 +323,6 @@ def collate_coco_json(result_files, file_name_mode, sort_images, relative_root):
 	}
 
 	return output, stats
-
 
 '''
 # ----------------------------------------------------------------------------------------------------
