@@ -22,6 +22,11 @@ import json
 import os
 import sys
 
+def _to_posix_path(path_text):
+	if isinstance(path_text, str):
+		return path_text.replace("\\", "/")
+	return path_text
+
 '''
 # ----------------------------------------------------------------------------------------------------
 # _normalize_file_name()
@@ -45,20 +50,20 @@ def _normalize_file_name(file_name, mode, json_dir, relative_root):
 		return file_name
 
 	if mode == "keep":
-		return file_name
+		return _to_posix_path(file_name)
 
 	base_name = os.path.basename(file_name)
 	if not base_name:
-		return file_name
+		return _to_posix_path(file_name)
 
 	if mode == "basename":
-		return base_name
+		return _to_posix_path(base_name)
 
 	if mode == "relative":
 		image_path = os.path.join(json_dir, "images", base_name)
-		return os.path.relpath(image_path, relative_root)
+		return _to_posix_path(os.path.relpath(image_path, relative_root))
 
-	return file_name
+	return _to_posix_path(file_name)
 
 '''
 # ----------------------------------------------------------------------------------------------------
@@ -366,8 +371,11 @@ def parse_args():
 	parser.add_argument(
 		"--file-name-mode",
 		choices=["keep", "basename", "relative"],
-		default="keep",
-		help="How to rewrite image file_name fields in the output JSON.",
+		default="relative",
+		help=(
+			"How to rewrite image file_name fields in the output JSON "
+			"(default: relative)."
+		),
 	)
 	parser.add_argument(
 		"--no-sort",
@@ -417,12 +425,30 @@ def main():
 	with open(output_json, "w", encoding="utf-8") as handle:
 		json.dump(output, handle, indent=2)
 
+	resolved_images = 0
+	total_images = 0
+	for image in output.get("images", []):
+		file_name = image.get("file_name")
+		if not isinstance(file_name, str):
+			continue
+		total_images += 1
+		candidate = os.path.join(input_dir, file_name)
+		if os.path.exists(candidate):
+			resolved_images += 1
+
 	print(f"Collated {len(result_files)} files into: {output_json}")
 	print(
 		f"Images: {len(output['images'])} | "
 		f"Annotations: {len(output['annotations'])} | "
 		f"Categories: {len(output['categories'])}"
 	)
+	if total_images and resolved_images != total_images:
+		print(
+			"Warning: "
+			f"{total_images - resolved_images}/{total_images} image file_name paths "
+			"do not resolve under the input directory. "
+			"Consider using --file-name-mode relative."
+		)
 	if stats["skipped_images"]:
 		print(f"Skipped images without id: {stats['skipped_images']}")
 	if stats["skipped_annotations"]:
