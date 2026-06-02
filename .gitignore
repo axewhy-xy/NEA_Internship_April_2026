@@ -34,3 +34,10 @@ logs
 *.bmp
 *.svg
 *.ico
+
+#Model checkpoints
+*.pth
+*.ckpt
+*.h5
+*.pt
+*.tar
