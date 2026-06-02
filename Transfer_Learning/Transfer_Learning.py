@@ -67,7 +67,21 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import box_iou, nms
 from torchvision.transforms import functional as F
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# setup_logging()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function sets up logging to both the console and a file. It creates the output directory if it 
+does not exist and configures the logging format and handlers.
 
+Args:
+- output_dir (Path): The directory where the log file will be saved.
+
+Returns:
+- None
+
+"""
 def setup_logging(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     log_path = output_dir / "train.log"
@@ -78,7 +92,22 @@ def setup_logging(output_dir: Path) -> None:
         handlers=handlers,
     )
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# set_seed()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function sets the random seed for reproducibility across various libraries and configurations. It
+ensures that the same seed is used for Python's random module, PyTorch's CPU and CUDA operations, and
+configures PyTorch's cuDNN backend for deterministic behavior.
 
+Args:
+- seed (int): The random seed to set.
+
+Returns:
+- None
+
+"""
 def set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
@@ -86,12 +115,48 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# collate_fn()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function is a custom collate function for the DataLoader. It takes a batch of data, which is a list
+of tuples containing images and their corresponding targets, and separates them into two list: one for
+images and one for targets. This is necessary because the default collate function does not handle batches
+of dictionaries well, which is the format of the targets in this object detection task.
 
+Args:
+- batch (Iterable[Tuple[torch.Tensor, Dict[str, torch.Tensor]]]): 
+  A batch of data from the DataLoader, where each item is a tuple of an image tensor and a target dictionary.
+
+Returns:
+- Tuple[List, List]:
+  A tuple containing two lists: the first list contains the image tensors, 
+  and the second list contains the target dictionaries.
+
+"""
 def collate_fn(batch: Iterable[Tuple[torch.Tensor, Dict[str, torch.Tensor]]]) -> Tuple[List, List]:
     images, targets = zip(*batch)
     return list(images), list(targets)
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# Compose Class
+# ----------------------------------------------------------------------------------------------------
+Description:
+This class is a custom implementation of a transform composition utility. It allows for chaining multiple
+transform together. Each transform is expected to be a callable that takes an image and a target dictionary,
+applies some transformation to the image and target, and returns the transformed image and target. The
+Compose class iterates through the list of transforms and applies them sequentially to the input image and
+target.
 
+Args:
+- transforms (List): A list of transform callables to be applied in sequence.
+
+Returns:
+- None (the class itself is callable and returns the transformed image and target when called)
+
+"""
 class Compose:
     def __init__(self, transforms: List):
         self.transforms = transforms
@@ -101,12 +166,48 @@ class Compose:
             image, target = transform(image, target)
         return image, target
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# ToTensor Class
+# ----------------------------------------------------------------------------------------------------
+Description:
+This class is a custom transform that converts a PIL image to a PyTorch tensor. It is designed to be used
+as part of a transform pipeline for object detection tasks. The __call__ method takes an image and a target
+dictionary, applies the conversion to the image, and returns the transformed image along with the unchanged
+target.
 
+Args:
+- None (the class itself is callable and does not require initialization parameters)
+
+Returns:
+- Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+  A tuple containing the transformed image as a PyTorch tensor and the original target dictionary.
+
+"""
 class ToTensor:
     def __call__(self, image: Image.Image, target: Dict[str, torch.Tensor]):
         return F.to_tensor(image), target
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# RandomHorizontalFlip Class
+# ----------------------------------------------------------------------------------------------------
+Description:
+This class is a custom transform that randomly flips an image and its corresponding bounding boxes 
+horizontally with a specified probability. The __call__ method checks if a random number is less than 
+the defined probability, and if so, it applies a horizontal flip to the image and adjusts the bounding 
+box coordinates accordingly. The target dictionary is updated with the new bounding box coordinates, 
+and both the transformed image and target are returned.
 
+Args:
+- probability (float): The probability with which the horizontal flip will be applied. Default is 0.5.
+
+Returns:
+- Tuple[Image.Image, Dict[str, torch.Tensor]]:
+  A tuple containing the potentially flipped image and the updated target dictionary with adjusted 
+  bounding boxes.
+
+"""
 class RandomHorizontalFlip:
     def __init__(self, probability: float = 0.5):
         self.probability = probability
@@ -121,20 +222,94 @@ class RandomHorizontalFlip:
                 target["boxes"] = boxes
         return image, target
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# get_transforms()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function generates a composition of transforms to be applied to the images and targets during training
+and validation. It takes a boolean indicating whether the transforms are for training and a probability for
+horizontal flipping. If the transforms are for training and the horizontal flip probability is greater than
+zero, it includes the RandomHorizontalFlip transform in the composition. The ToTensor transform is always
+included to convert images to tensors. The function returns a Compose object that encapsulates the defined
+transforms.
 
+Args:
+- train (bool): A boolean indicating whether the transforms are for training. If True, data augmentation
+  may be applied.
+- hflip_prob (float): The probability of applying the RandomHorizontalFlip transform. This is only
+    considered if train is True.
+
+Returns:
+- Compose: A Compose object that contains the sequence of transforms to be applied to the images and targets.
+
+"""
 def get_transforms(train: bool, hflip_prob: float) -> Compose:
     transforms: List = [ToTensor()]
     if train and hflip_prob > 0:
         transforms.insert(0, RandomHorizontalFlip(hflip_prob))
     return Compose(transforms)
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# DatasetInfo Dataclass
+# ----------------------------------------------------------------------------------------------------
+Description:
+This dataclass is a simple container for storing information about the dataset, specifically the mapping
+from category IDs to label indices and from label indices to category names. The category_id_to_label
+dictionary maps the original category IDs from the dataset to a contiguous range of label indices starting
+from 1 (with 0 reserved for background). The label_to_name dictionary provides a mapping from these label
+indices back to human-readable category names, which can be useful for visualization and interpretation of results.
 
+Args:
+- category_id_to_label (Dict[int, int]): A dictionary mapping original category IDs to label indices.
+- label_to_name (Dict[int, str]): A dictionary mapping label indices to category names.
+
+Returns:
+- None (the dataclass itself is a simple data container and does not have behavior)
+
+"""
 @dataclass
 class DatasetInfo:
     category_id_to_label: Dict[int, int]
     label_to_name: Dict[int, str]
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# CocoDetectionDataset Class
+# ----------------------------------------------------------------------------------------------------
+Description:
+This class is a custom implementation of a PyTorch Dataset for loading and processing a COCO-style object
+detection dataset. It reads the dataset information from a JSON file, resolves image paths, and prepares
+the data for training and evaluation. The __getitem__ method loads an image, retrieves its annotations,
+and applies any specified transforms to both the image and the target. The dataset is designed to be flexible
+in terms of handling missing images, verifying image existence, and limiting the number of samples for
+quick testing. It also constructs the target dictionary in the format expected by the Faster R-CNN model.
 
+Args:
+- json_path (Path): The path to the JSON file containing the dataset annotations.
+- images_dir (Path): The directory where the images are stored.
+- transforms (Optional[Compose]): A composition of transforms to be applied to the images and targets.
+- category_id_to_label (Optional[Dict[int, int]]): A mapping from original category IDs to label indices.
+- label_to_name (Optional[Dict[int, str]]): A mapping from label indices to category names.
+- verify_images (bool): Whether to verify the existence of images when resolving paths.
+- skip_missing (bool): Whether to skip records with missing images instead of raising an error.
+- limit (int): An optional limit on the number of samples to load from the dataset. If 0, all samples are loaded.
+
+Member Functions:
+- __init__: Initializes the dataset by loading the JSON annotations, resolving image paths, and preparing
+  the dataset information.
+- _resolve_image_path: A helper function to resolve the path to an image based on the information in the
+    JSON and the provided images directory.
+- __len__: Returns the number of samples in the dataset.
+- get_image_path: Retrieves the resolved image path for a given image ID.
+- __getitem__: Loads an image and its corresponding annotations, applies transforms, and returns the image
+  and target in the format expected by the model.
+
+Returns:
+- None (the class itself is a PyTorch Dataset and does not return anything upon initialization)
+
+"""
 class CocoDetectionDataset(Dataset):
     def __init__(
         self,
@@ -304,7 +479,28 @@ class CocoDetectionDataset(Dataset):
 
         return image, target
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# create_model()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function creates a Faster R-CNN model with a ResNet-50 backbone and a Feature Pyramid Network (FPN). 
+It allows for customization of the number of classes, whether to use pretrained weights, how many backbone
+layers to train, and the minimum and maximum input sizes. The function initializes the model with the specified
+parameters and replaces the default box predictor with a new one that matches the number of classes in the
+dataset.
 
+Args:
+- num_classes (int): The number of classes for the object detection task, including the background class.
+- pretrained (bool): Whether to use pretrained weights for the backbone and FPN.
+- trainable_backbone_layers (int): The number of backbone layers to set as trainable. The rest will be frozen.
+- min_size (Optional[int]): The minimum size of the input images. If None, the default value is used.
+- max_size (Optional[int]): The maximum size of the input images. If None, the default value is used.
+
+Returns:
+- nn.Module: The initialized Faster R-CNN model ready for training or evaluation.
+
+"""
 def create_model(
     num_classes: int,
     pretrained: bool,
@@ -323,14 +519,60 @@ def create_model(
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
     return model
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# move_targets_to_device()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function takes a list of target dictionaries, where each dictionary contains tensors for bounding
+boxes, labels, and other relevant information for object detection, and moves all the tensors to the
+specified device (CPU or GPU). This is necessaary to ensure that the targets are on the same device as
+the model during training and evaluation. The function iterates through each target dictionary and moves
+each tensor to the specified device, returning a new list of target dictionaries with the tensors on the
+correct device.
 
+Args:
+- targets (List[Dict[str, torch.Tensor]]): A list of target dictionaries, where each dictionary contains
+  tensors for bounding boxes, labels, and other relevant information for object detection.
+- device (torch.device): The device to which the tensors should be moved (e.g., torch.device('cuda') or 
+  torch.device('cpu')).
+
+Returns:
+- List[Dict[str, torch.Tensor]]: A new list of target dictionaries with all tensors moved to the specified device.
+
+"""
 def move_targets_to_device(targets: List[Dict[str, torch.Tensor]], device: torch.device):
     moved = []
     for target in targets:
         moved.append({key: value.to(device) for key, value in target.items()})
     return moved
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# train_one_epoch()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function performs one epoch of training for the given model. It iterates through the data loader,
+moving images and targets to the specified device, and computes the loss for each batch. The function
+supports mixed precision training using a GradScaler, and applies gradient clipping if a max_norm is 
+specified. It also logs the average loss at a specified frequency. The function returns the average
+loss for the epoch after processing all batches.
 
+Args:
+- model (nn.Module): The model to be trained.
+- optimizer (torch.optim.Optimizer): The optimizer used for updating the model parameters.
+- data_loader (DataLoader): The DataLoader providing the training data.
+- device (torch.device): The device on which to perform the training (e.g., torch.device('cuda') or
+    torch.device('cpu')).
+- epoch (int): The current epoch number, used for logging purposes.
+- scaler (Optional[torch.cuda.amp.GradScaler]): An optional GradScaler for mixed precision training.
+- max_norm (float): The maximum norm for gradient clipping. If 0, no clipping is applied.
+- print_freq (int): The frequency (in steps) at which to log the average loss.
+
+Returns:
+- float: The average loss for the epoch after processing all batches.
+
+"""
 def train_one_epoch(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -376,7 +618,30 @@ def train_one_epoch(
 
     return running_loss / max(1, len(data_loader))
 
- 
+"""
+# ----------------------------------------------------------------------------------------------------
+# compute_validation_loss()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function computes the average validation loss for the given model on the provided data loader.
+It sets the model to evaluation mode, but ensures that certain modules like BatchNorm and Dropout remains
+in evaluation mode to avoid issues with small batch sizes. This has to be done since loss is only evaluated
+in training mode for Faster R-CNN. The function iterates through the validation data, moving images and
+targets to the specified device, and computes the loss for each batch without updating the model parameters.
+It also handles mixed precision evaluation if a GradScaler is enabled. The function returns the average validation
+loss after processing all batches.
+
+Args:
+- model (nn.Module): The model for which to compute the validation loss.
+- data_loader (DataLoader): The DataLoader providing the validation data.
+- device (torch.device): The device on which to perform the evaluation (e.g., torch.device('cuda') or
+    torch.device('cpu')).
+- use_amp (bool): Whether to use automatic mixed precision (AMP) during evaluation.
+
+Returns:
+- float: The average validation loss after processing all batches.
+
+"""
 def compute_validation_loss(
     model: nn.Module,
     data_loader: DataLoader,
@@ -418,7 +683,31 @@ def compute_validation_loss(
 
     return running_loss / max(1, len(data_loader))
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# evaluate()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function evaluates the performance of the given model on the provided data loader using object
+detection metrics. It computes true positives, false positives, false negatives, and mean IoU based on
+the model's predictions and the ground truth annotations. The function applies a score threshold to filter
+predictions, and uses non-maximum suppression (NMS) to remove duplicate detections. It then calculates 
+precision, recall, F1 score, and mean IoU based on the matches between predictions and ground truth boxes.
+The function returns a dictionary containing these evaluation metrics.
 
+Args:
+- model (nn.Module): The model to be evaluated.
+- data_loader (DataLoader): The DataLoader providing the evaluation data.
+- device (torch.device): The device on which to perform the evaluation (e.g., torch.device('cuda') or
+    torch.device('cpu')).
+- score_threshold (float): The minimum confidence score required for a prediction to be considered valid.
+- iou_threshold (float): The IoU threshold for determining true positives when matching predictions to ground truth.
+- nms_iou_threshold (float): The IoU threshold to use for non-maximum suppression to filter out duplicate detections.
+
+Returns:
+- Dict[str, float]: A dictionary containing the evaluation metrics: precision, recall, F1 score, and mean IoU.
+
+"""
 def evaluate(
     model: nn.Module,
     data_loader: DataLoader,
@@ -500,7 +789,22 @@ def evaluate(
         "mean_iou": mean_iou,
     }
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# get_plotting_backend()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function attempts to import the Matplotlib plotting library and returns the pyplot module if the
+import is successful. If Matplotlib is not installed, the function returns None. This allows the rest of
+the code to check for the availability of Matplotlib before attempting to generate plots, and to handle
+the absence of the library gracefully without crashing.
 
+Args:
+- None
+
+Returns:
+- Optional[ModuleType]: The Matplotlib pyplot module if available, or None if Matplotlib is not installed.
+"""
 def get_plotting_backend():
     try:
         import matplotlib.pyplot as plt
@@ -508,7 +812,30 @@ def get_plotting_backend():
         return None
     return plt
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# save_training_plots()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function generates and saves training and validation loss curves, as well as validation metrics
+curves, based on the provided training history. It takes a history dictionary containing list of loss
+and metric values for each epoch, an output directory to save the plots, and the Matplotlib pyplot module.
+The function checks if the necessary data is available in the history and generates the corresponding plots.
+The loss curve plot shows the training and validation loss over epochs, while the metrics curve plot shows
+the precision, recall, F1 score, and mean IoU over epochs. The generated plots are saved as PNG files in the
+specified output directory. If the history does not contain the required data for plotting, the function 
+will simply return without generating any plots.
 
+Args:
+- history (Dict[str, List[float]]): A dictionary containing lists of loss and metric values for each epoch.
+  Expected keys include "train_loss", "val_loss", "precision", "recall", "f1", and "mean_iou".
+- output_dir (Path): The directory where the generated plots should be saved.
+- plt: The Matplotlib pyplot module used for plotting. This should be obtained from the get_plotting_backend() function.
+
+Returns:
+- None (the function generates and saves plots but does not return any value)
+
+"""
 def save_training_plots(
     history: Dict[str, List[float]],
     output_dir: Path,
@@ -555,7 +882,23 @@ def save_training_plots(
         fig.savefig(output_dir / "metrics_curve.png", dpi=200)
         plt.close(fig)
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# _color_from_label()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper function generates a consistent RGB color tuple based on an integer label. It uses simple
+modulo operations with prime numbers to create a pseudo-random but deterministic color for each label.
+This can be useful for visualizing predictions with different colors for different classes, ensuring
+that the same label always gets the same color across different images and runs.
 
+Args:
+- label (int): The integer label for which to generate a color.
+
+Returns:
+- Tuple[int, int, int]: A tuple representing the RGB color corresponding to the given label.
+
+"""
 def _color_from_label(label: int) -> Tuple[int, int, int]:
     return (
         int((37 * label) % 255),
@@ -563,7 +906,36 @@ def _color_from_label(label: int) -> Tuple[int, int, int]:
         int((29 * label) % 255),
     )
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# visualize_predictions()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function visualizes the predictions of the model on a given dataset and saves the resulting images
+with bounding boxes drawn around the detected objects. It takes the model, a data loader for the dataset,
+the dataset object itself, the device to run the model on, an output directory to save the visualizations,
+the score threshold for filtering predictions, IoU threshold for non-maximum suppression, and a mapping
+from label indices to category names. The function iterates through the data loader, obtains the model's 
+predictions, applies the score threshold and NMS to filter the predictions, and then draws bounding boxes
+and labels on the original images using OpenCV. The visualized images are saved to the specified output
+directory. If OpenCV is not installed, the function raises a RuntimeError indicating that OpenCV is required for
+prediction visualization.
 
+Args:
+- model (nn.Module): The trained model to use for generating predictions.
+- data_loader (DataLoader): The DataLoader providing the dataset to visualize.
+- dataset (CocoDetectionDataset): The dataset object, used to resolve image paths for visualization.
+- device (torch.device): The device on which to run the model for generating predictions (e.g., torch.device('cuda') or
+    torch.device('cpu')).
+- output_dir (Path): The directory where the visualized images should be saved.
+- score_threshold (float): The minimum confidence score required for a prediction to be visualized.
+- nms_iou_threshold (float): The IoU threshold to use for non-maximum suppression when filtering predictions.
+- label_to_name (Dict[int, str]): A mapping from label indices to human-readable category names for labeling the visualizations.
+
+Returns:
+- None (the function generates and saves visualized images but does not return any value)
+
+"""
 def visualize_predictions(
     model: nn.Module,
     data_loader: DataLoader,
@@ -659,7 +1031,35 @@ def visualize_predictions(
 
     logging.info("Saved test prediction visualizations to %s", output_dir)
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# save_checkpoint()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function saves the training checkpoint for the model, including the model state, optimizer state,
+scheduler state, current epoch, best metric value, and dataset information. The checkpoint is saved to
+the specified output directory, with a filename indicating whether it is the last checkpoint or the best
+checkpoint based on the metric. The function creates the output directory if it does not exist, and saves
+the checkpoint using PyTorch's torch.save() function. The checkpoint includes all necessary information to
+resume training or to evaluate the model later.
 
+Args:
+- output_dir (Path): The directory where the checkpoint should be saved.
+- model (nn.Module): The model whose state is to be saved.
+- optimizer (torch.optim.Optimizer): The optimizer whose state is to be saved.
+- scheduler (Optional[torch.optim.lr_scheduler._LRScheduler]): The learning rate scheduler whose state 
+    is to be saved, if applicable.
+- epoch (int): The current epoch number to be saved in the checkpoint.
+- best_metric (float): The best metric value achieved so far, to be saved in the checkpoint.
+- dataset_info (DatasetInfo): The dataset information containing category and label mappings to
+     be saved in the checkpoint.
+- is_best (bool): A flag indicating whether this checkpoint is the best one based on the metric,
+     which determines the filename.
+
+Returns:
+- None (the function saves the checkpoint to disk but does not return any value)
+
+"""
 def save_checkpoint(
     output_dir: Path,
     model: nn.Module,
@@ -686,7 +1086,29 @@ def save_checkpoint(
         best_path = output_dir / "model_best.pth"
         torch.save(state, best_path)
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# load_checkpoint()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function loads a training checkpoint for the model, including the model state, optimizer state,
+scheduler state, and dataset information. The checkpoint is loaded from the specified path, and the model,
+optimizer, and scheduler are updated with the loaded states. The function returns the loaded checkpoint
+as a dictionary, which includes the epoch number, best metric value, and dataset information. This allows
+for resuming the training process or evaluating the model later with the same dataset information.
 
+Args:
+- checkpoint_path (Path): The path to the checkpoint file to be loaded.
+- model (nn.Module): The model into which the state should be loaded.
+- optimizer (Optional[torch.optim.Optimizer]): The optimizer into which the state should be loaded,
+     if applicable.
+- scheduler (Optional[torch.optim.lr_scheduler._LRScheduler]): The learning rate scheduler into which
+     the state should be loaded, if applicable.
+
+Returns:
+- Dict: A dictionary containing the loaded checkpoint information, including epoch number, best metric
+     value, and dataset information.
+"""
 def load_checkpoint(
     checkpoint_path: Path,
     model: nn.Module,
@@ -705,7 +1127,28 @@ def load_checkpoint(
         scheduler.load_state_dict(checkpoint["scheduler_state"])
     return checkpoint
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# apply_nms()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function applies non-maximum suppression (NMS) to the predicted bounding boxes, scores, and labels.
+It processes the predictions for each unique label separately, applies NMS to filter out duplicate detections,
+and then combines the results. The function returns the filtered boxes, scores, and labels after NMS. If
+there are no boxes to process, it returns empty tensors.
 
+Args:
+- boxes (torch.Tensor): A tensor of shape (N, 4) containing the predicted bounding boxes in (x1, y1, x2, y2) format.
+- scores (torch.Tensor): A tensor of shape (N,) containing the confidence scores for each predicted box.
+- labels (torch.Tensor): A tensor of shape (N,) containing the predicted class labels for each box.
+- iou_threshold (float): The IoU threshold to use for non-maximum suppression. Boxes with IoU greater than
+    this threshold will be suppressed.
+
+Returns:
+- Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing the filtered boxes, scores, and labels
+    after applying non-maximum suppression.
+
+"""
 def apply_nms(
     boxes: torch.Tensor,
     scores: torch.Tensor,
@@ -732,7 +1175,29 @@ def apply_nms(
     keep = keep[order]
     return boxes[keep], scores[keep], labels[keep]
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# build_dataloaders()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function builds the training, validation, and test DataLoaders for the COCO-style dataset based on
+the provided arguments. It reads the JSON annotations and image directories for each split, creates the
+corresponding CocoDetectionDataset instances, and then constructs DataLoaders with the specified batch size,
+number of workers, and other settings. The function also handles the case where a DatasetInfo object is 
+provided, ensuring that the same category and label mappings are used across all splits. It returns the 
+dataset information along with the three DataLoaders for training, validation, and testing.
 
+Args:
+- args (argparse.Namespace): The command-line arguments containing dataset paths, batch size, 
+    number of workers, and other settings.
+- dataset_info (Optional[DatasetInfo]): An optional DatasetInfo object containing category 
+    and label mappings.
+
+Returns:
+- Tuple[DatasetInfo, DataLoader, DataLoader, DataLoader]: A tuple containing the dataset information
+ and the DataLoaders for training, validation, and testing.
+
+"""
 def build_dataloaders(
     args: argparse.Namespace,
     dataset_info: Optional[DatasetInfo] = None,
@@ -811,7 +1276,26 @@ def build_dataloaders(
 
     return dataset_info, train_loader, valid_loader, test_loader
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# parse_args()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function parses the command-line arguments for the training and evaluation script. It sets up various
+arguments related to dataset paths, training hyperparameters, model configuration, evaluation settings, and
+other options. The function also provides default values for most of the arguments, and constructs default
+paths for the dataset and output directories based on the script's location. The parsed arguments are returned
+as an argparse.Namespace object, which can be used throughout the script to access the configuration settings
+for training and evaluation.
 
+Args:
+- None (the function reads command-line arguments directly)
+
+Returns:
+- argparse.Namespace: An object containing the parsed command-line arguments for configuring the
+ training and evaluation process.
+
+"""
 def parse_args() -> argparse.Namespace:
     script_dir = Path(__file__).resolve().parent
     default_data_root = script_dir.parent / "Labelled_Dataset"
@@ -861,7 +1345,28 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# main()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This is the main function that orchestrates the entire training and evaluation process. The function
+starts by parsing command-line arguments, setting up logging, and determining the device to use for
+training. It then builds the DataLoaders for training, validation, and testing using the provided dataset
+paths and configurations. The model is created based on the specified number of classes and whether to
+use pre-trained weights. The optimizer and learning rate scheduler are set up according to the provided 
+hyperparameters. The function handles resuming from a checkpoint if specified, and then enters the training
+loop for the specified number of epochs. During each epoch, it trains the model, compute validation loss,
+evaluates the model on the validation set, and saves checkpoints based on the performance. After training
+is complete, it evaluates the best model on the test set and visualizes the predictions.
 
+Args:
+- None (the function reads command-line arguments directly)
+
+Returns:
+- None (the function performs training and evaluation but does not return any value)
+
+"""
 def main() -> None:
     args = parse_args()
     run_id = args.run_name.strip() or datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1059,7 +1564,7 @@ def main() -> None:
         label_to_name=dataset_info.label_to_name,
     )
 
-
+# Main Entry Point
 if __name__ == "__main__":
     torch.multiprocessing.freeze_support()
     main()
