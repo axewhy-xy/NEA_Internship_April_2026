@@ -67,6 +67,55 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import box_iou, nms
 from torchvision.transforms import functional as F
 
+def parse_args() -> argparse.Namespace:
+    script_dir = Path(__file__).resolve().parent
+    default_data_root = script_dir.parent / "Labelled_Dataset"
+    default_output_root = script_dir / "runs"
+
+    parser = argparse.ArgumentParser(description="Train and evaluate Faster R-CNN on a COCO-style dataset.")
+    parser.add_argument("--data-root", type=str, default=str(default_data_root), help="Root directory containing train/valid/test subdirectories with JSON annotations and images.")
+    parser.add_argument("--train-dir", type=str, default="train", help="Name of the training subdirectory.")
+    parser.add_argument("--valid-dir", type=str, default="valid", help="Name of the validation subdirectory.")
+    parser.add_argument("--test-dir", type=str, default="test", help="Name of the test subdirectory.")
+    parser.add_argument("--annotations-filename", type=str, default="result.json", help="Name of the JSON annotations file.")
+    parser.add_argument("--images-dirname", type=str, default="images", help="Name of the images subdirectory.")
+    parser.add_argument("--output-root", type=str, default=str(default_output_root), help="Root directory for saving outputs.")
+    parser.add_argument("--run-name", type=str, default="", help="Name of the run for logging and saving purposes.")
+
+    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs.")
+    parser.add_argument("--batch-size", type=int, default=4, help="Batch size for training and validation.")
+    parser.add_argument("--num-workers", type=int, default=0 if os.name == "nt" else 4, help="Number of worker processes for data loading.")
+    parser.add_argument("--learning-rate", type=float, default=0.005, help="Learning rate for the optimizer.")
+    parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for the optimizer.")
+    parser.add_argument("--weight-decay", type=float, default=0.0005, help="Weight decay for the optimizer.")
+    parser.add_argument("--lr-step-size", type=int, default=3, help="Step size for the learning rate scheduler.")
+    parser.add_argument("--lr-gamma", type=float, default=0.5, help="Gamma for the learning rate scheduler.")
+    parser.add_argument("--max-grad-norm", type=float, default=10.0, help="Maximum norm for gradient clipping.")
+
+    parser.add_argument("--trainable-backbone-layers", type=int, default=3, help="Number of trainable backbone layers.")
+    parser.add_argument("--min-size", type=int, default=None, help="Minimum image size.")
+    parser.add_argument("--max-size", type=int, default=None, help="Maximum image size.")
+    parser.add_argument("--no-pretrained", action="store_true", help="Do not use pretrained weights.")
+
+    parser.add_argument("--score-threshold", type=float, default=0.5, help="Minimum score threshold for detections.")
+    parser.add_argument("--iou-threshold", type=float, default=0.5, help="Minimum IoU threshold for detections.")
+    parser.add_argument("--nms-iou-threshold", type=float, default=0.5, help="IoU threshold for non-maximum suppression.")
+    parser.add_argument("--hflip-prob", type=float, default=0.5, help="Probability of horizontal flip augmentation.")
+
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use for training.")
+    parser.add_argument("--amp", action="store_true", help="Use automatic mixed precision.")
+    parser.add_argument("--print-freq", type=int, default=20, help="Frequency of printing training progress.")
+    parser.add_argument("--limit", type=int, default=0, help="Limit the number of samples for debugging.")
+    parser.add_argument("--skip-missing", action="store_true", help="Skip missing images during training.")
+
+    parser.add_argument("--resume", type=str, default="", help="Path to checkpoint to resume training from.")
+    parser.add_argument("--test-only", action="store_true", help="Run evaluation only.")
+    parser.add_argument("--skip-test", action="store_true", help="Skip test evaluation after training.")
+    parser.add_argument("--save-every", type=int, default=0, help="Save checkpoint every N epochs.")
+
+    return parser.parse_args()
+
 def main() -> None:
     args = parse_args()
     run_id = args.run_name.strip() or datetime.now().strftime("%Y%m%d-%H%M%S")
