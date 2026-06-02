@@ -512,7 +512,11 @@ def create_model(
     max_size: Optional[int],
 ) -> nn.Module:
     weights = FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT if pretrained else None
-    kwargs = {"trainable_backbone_layers": trainable_backbone_layers}
+    kwargs = {}
+    if pretrained:
+        kwargs["trainable_backbone_layers"] = trainable_backbone_layers
+    else:
+        kwargs["weights_backbone"] = None
     if min_size is not None:
         kwargs["min_size"] = min_size
     if max_size is not None:
@@ -549,6 +553,31 @@ def move_targets_to_device(targets: List[Dict[str, torch.Tensor]], device: torch
     for target in targets:
         moved.append({key: value.to(device) for key, value in target.items()})
     return moved
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# autocast_context()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function provides a context manager for automatic mixed precision (AMP) based on the availability of
+the torch.amp.autocast API. It checks if the autocast function is available in the current version of PyTorch
+and uses it if possible. If not, it falls back to using torch.cuda.amp.autocast for CUDA devices. This allows
+the code to be compatible with different versions of PyTorch while still benefiting from mixed precision training
+when available. The context manager can be used to wrap the forward pass of the model during training and
+evaluation to enable AMP for improved performance on supported hardware.
+
+Args:
+- device (torch.device): The device type for which to enable autocast (e.g., torch.device('cuda') or torch.device('cpu')).
+- enabled (bool): Whether to enable autocast. This should typically be True during training and evaluation when AMP is desired.
+
+Returns:
+- Context manager for autocast that can be used with a "with" statement to enable mixed precision operations.
+
+"""
+def autocast_context(device: torch.device, enabled: bool):
+    if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
+        return torch.amp.autocast(device_type=device.type, enabled=enabled)
+    return torch.cuda.amp.autocast(enabled=enabled and device.type == "cuda")
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -593,7 +622,7 @@ def train_one_epoch(
         targets = move_targets_to_device(targets, device)
 
         amp_enabled = scaler is not None and scaler.is_enabled()
-        with torch.cuda.amp.autocast(enabled=amp_enabled):
+        with autocast_context(device, amp_enabled):
             loss_dict = model(images, targets)
             losses = sum(loss for loss in loss_dict.values())
 
@@ -672,7 +701,7 @@ def compute_validation_loss(
             for images, targets in data_loader:
                 images = [image.to(device) for image in images]
                 targets = move_targets_to_device(targets, device)
-                with torch.cuda.amp.autocast(enabled=amp_enabled):
+                with autocast_context(device, amp_enabled):
                     loss_dict = model(images, targets)
                     losses = sum(loss for loss in loss_dict.values())
 
@@ -911,6 +940,32 @@ def _color_from_label(label: int) -> Tuple[int, int, int]:
 
 """
 # ----------------------------------------------------------------------------------------------------
+# _is_relative_to()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper function checks if a given path is relative to a specified parent path. It attempts to compute
+the relative path from the given path to the parent path using the Path.relative_to() method. If the given
+path is indeed relative to the parent, the method will succeed and the function returns True. If the given
+path is not relative to the parent, a ValueError will be raised, which is caught by the function, and it 
+returns False. This function can be used to verify that resolved image paths are within expected directories.
+
+Args:
+- path (Path): The path to check for being relative to the parent.
+- parent (Path): The parent path to which the given path should be relative.
+
+Returns:
+- bool: True if the given path is relative to the parent path, False otherwise.
+
+"""
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+"""
+# ----------------------------------------------------------------------------------------------------
 # visualize_predictions()
 # ----------------------------------------------------------------------------------------------------
 Description:
@@ -1074,6 +1129,14 @@ def run_deploy_inference(
     except ImportError as exc:
         raise RuntimeError("OpenCV (cv2) is required for deployment visualization.") from exc
 
+    images_dir = images_dir.resolve()
+    output_dir = output_dir.resolve()
+    if output_dir == images_dir or _is_relative_to(output_dir, images_dir):
+        raise ValueError(
+            "Deployment output directory must be outside the input image directory "
+            "to avoid overwriting or re-processing input images."
+        )
+
     valid_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
     image_paths = sorted(
         [
@@ -1111,7 +1174,7 @@ def run_deploy_inference(
                 continue
 
             images = [item[1].to(device) for item in batch_items]
-            with torch.cuda.amp.autocast(enabled=amp_enabled):
+            with autocast_context(device, amp_enabled):
                 outputs = model(images)
 
             for (image_path, _), output in zip(batch_items, outputs):
@@ -1180,7 +1243,8 @@ def run_deploy_inference(
                 except ValueError:
                     output_path = output_dir / image_path.name
                 output_path.parent.mkdir(parents=True, exist_ok=True)
-                cv2.imwrite(str(output_path), image)
+                if not cv2.imwrite(str(output_path), image):
+                    logging.warning("Failed to write deploy output %s", output_path)
 
     logging.info("Saved deploy predictions to %s", output_dir)
 
@@ -1552,11 +1616,6 @@ def main() -> None:
     output_dir = Path(args.output_root) / run_id
     setup_logging(output_dir)
 
-    plot_backend = get_plotting_backend()
-    graphical_dir = output_dir / "graphical_results"
-    if plot_backend is None:
-        logging.warning("matplotlib not available; skipping graphical results.")
-
     logging.info("Starting run %s", run_id)
     logging.info("Arguments: %s", args)
 
@@ -1567,7 +1626,7 @@ def main() -> None:
         logging.warning("CUDA requested but not available. Falling back to CPU.")
         device = torch.device("cpu")
     else:
-        logging.info("Using CUDA device: %s", device)
+        logging.info("Using device: %s", device)
 
     if args.test_deploy:
         deploy_dir = Path(args.test_deploy)
@@ -1638,17 +1697,20 @@ def main() -> None:
         model.to(device)
 
         deploy_output = Path(args.deploy_output) if args.deploy_output else output_dir / "deploy_predictions"
-        run_deploy_inference(
-            model=model,
-            images_dir=deploy_dir,
-            output_dir=deploy_output,
-            device=device,
-            score_threshold=args.score_threshold,
-            nms_iou_threshold=args.nms_iou_threshold,
-            label_to_name=label_to_name,
-            batch_size=args.batch_size,
-            use_amp=args.amp,
-        )
+        try:
+            run_deploy_inference(
+                model=model,
+                images_dir=deploy_dir,
+                output_dir=deploy_output,
+                device=device,
+                score_threshold=args.score_threshold,
+                nms_iou_threshold=args.nms_iou_threshold,
+                label_to_name=label_to_name,
+                batch_size=args.batch_size,
+                use_amp=args.amp,
+            )
+        except (RuntimeError, ValueError) as exc:
+            logging.error("%s", exc)
         return
 
     dataset_info, train_loader, valid_loader, test_loader = build_dataloaders(args)
@@ -1722,6 +1784,11 @@ def main() -> None:
             label_to_name=dataset_info.label_to_name,
         )
         return
+
+    plot_backend = get_plotting_backend()
+    graphical_dir = output_dir / "graphical_results"
+    if plot_backend is None:
+        logging.warning("matplotlib not available; skipping graphical results.")
 
     for epoch in range(start_epoch, args.epochs + 1):
         train_loss = train_one_epoch(
