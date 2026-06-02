@@ -240,6 +240,59 @@ def create_model(
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
     return model
 
+def train_one_epoch(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    data_loader: DataLoader,
+    device: torch.device,
+    epoch: int,
+    scaler: Optional[torch.cuda.amp.GradScaler],
+    max_norm: float,
+    print_freq: int,
+) -> float:
+    model.train()
+    running_loss = 0.0
+    for step, (images, targets) in enumerate(data_loader):
+        images = [image.to(device) for image in images]
+        targets = move_targets_to_device(targets, device)
+
+        amp_enabled = scaler is not None and scaler.is_enabled()
+        with torch.cuda.amp.autocast(enabled=amp_enabled):
+            loss_dict = model(images, targets)
+            losses = sum(loss for loss in loss_dict.values())
+
+        if not torch.isfinite(losses):
+            raise ValueError(f"Non-finite loss detected: {losses.item():.6f}")
+
+        optimizer.zero_grad(set_to_none=True)
+        if amp_enabled:
+            scaler.scale(losses).backward()
+            scaler.unscale_(optimizer)
+            if max_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            losses.backward()
+            if max_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+            optimizer.step()
+
+        running_loss += losses.item()
+        if (step + 1) % print_freq == 0:
+            avg_loss = running_loss / (step + 1)
+            logging.info("Epoch %d | Step %d/%d | Loss %.4f", epoch, step + 1, len(data_loader), avg_loss)
+
+    return running_loss / max(1, len(data_loader))
+
+
+def _color_from_label(label: int) -> Tuple[int, int, int]:
+    return (
+        int((37 * label) % 255),
+        int((17 * label) % 255),
+        int((29 * label) % 255),
+    )
+
 def visualize_predictions(
     model: nn.Module,
     data_loader: DataLoader,
