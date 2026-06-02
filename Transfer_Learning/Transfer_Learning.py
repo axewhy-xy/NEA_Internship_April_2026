@@ -92,6 +92,29 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def collate_fn(batch: Iterable[Tuple[torch.Tensor, Dict[str, torch.Tensor]]]) -> Tuple[List, List]:
+    images, targets = zip(*batch)
+    return list(images), list(targets)
+
+def create_model(
+    num_classes: int,
+    pretrained: bool,
+    trainable_backbone_layers: int,
+    min_size: Optional[int],
+    max_size: Optional[int],
+) -> nn.Module:
+    weights = FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT if pretrained else None
+    kwargs = {"trainable_backbone_layers": trainable_backbone_layers}
+    if min_size is not None:
+        kwargs["min_size"] = min_size
+    if max_size is not None:
+        kwargs["max_size"] = max_size
+    model = fasterrcnn_resnet50_fpn_v2(weights=weights, **kwargs)
+    in_features = model.roi_heads.box_predictor.cls_score.in_features
+    model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+    return model
+
+
 def parse_args() -> argparse.Namespace:
     script_dir = Path(__file__).resolve().parent
     default_data_root = script_dir.parent / "Labelled_Dataset"
