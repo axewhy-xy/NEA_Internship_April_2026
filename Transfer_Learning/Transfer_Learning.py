@@ -141,6 +141,261 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
+@dataclass
+class DatasetInfo:
+    category_id_to_label: Dict[int, int]
+    label_to_name: Dict[int, str]
+
+
+class CocoDetectionDataset(Dataset):
+    def __init__(
+        self,
+        json_path: Path,
+        images_dir: Path,
+        transforms: Optional[Compose] = None,
+        category_id_to_label: Optional[Dict[int, int]] = None,
+        label_to_name: Optional[Dict[int, str]] = None,
+        verify_images: bool = True,
+        skip_missing: bool = False,
+        limit: int = 0,
+    ) -> None:
+        self.json_path = json_path
+        self.images_dir = images_dir
+        self.transforms = transforms
+        self.verify_images = verify_images
+        self.skip_missing = skip_missing
+
+        with json_path.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        images = data.get("images", [])
+        categories = data.get("categories", [])
+        annotations = data.get("annotations", [])
+
+        if category_id_to_label is None:
+            if categories:
+                sorted_categories = sorted(categories, key=lambda item: item["id"])
+                category_id_to_label = {cat["id"]: idx + 1 for idx, cat in enumerate(sorted_categories)}
+                label_to_name = {idx + 1: cat.get("name", str(cat["id"])) for idx, cat in enumerate(sorted_categories)}
+            else:
+                unique_ids = sorted({ann["category_id"] for ann in annotations})
+                category_id_to_label = {cat_id: idx + 1 for idx, cat_id in enumerate(unique_ids)}
+                label_to_name = {idx + 1: str(cat_id) for idx, cat_id in enumerate(unique_ids)}
+        else:
+            if label_to_name is None:
+                label_to_name = {label: str(cat_id) for cat_id, label in category_id_to_label.items()}
+
+        self.dataset_info = DatasetInfo(
+            category_id_to_label=category_id_to_label,
+            label_to_name=label_to_name,
+        )
+
+        self._annotations_by_image: Dict[int, List[Dict]] = defaultdict(list)
+        for ann in annotations:
+            self._annotations_by_image[ann["image_id"]].append(ann)
+
+        json_dir = json_path.parent
+        image_records = []
+        for image_info in images:
+            resolved = self._resolve_image_path(json_dir, image_info)
+            if resolved is None:
+                message = f"Missing image for {image_info.get('file_name', 'unknown')} in {json_path}"
+                if skip_missing:
+                    logging.warning(message)
+                    continue
+                raise FileNotFoundError(message)
+            image_records.append({"info": image_info, "path": resolved})
+
+        if limit > 0:
+            image_records = image_records[:limit]
+
+        self._image_records = image_records
+        self._image_id_to_path = {
+            record["info"]["id"]: record["path"]
+            for record in image_records
+            if "id" in record["info"]
+        }
+
+    def _resolve_image_path(self, json_dir: Path, image_info: Dict) -> Optional[Path]:
+        file_name = image_info.get("file_name", "")
+        if not file_name:
+            return None
+
+        candidate_paths = []
+        file_path = Path(file_name)
+        if file_path.is_absolute():
+            candidate_paths.append(file_path)
+        else:
+            candidate_paths.append(json_dir / file_path)
+            candidate_paths.append(self.images_dir / file_path)
+
+        candidate_paths.append(self.images_dir / file_path.name)
+
+        for candidate in candidate_paths:
+            if candidate.exists():
+                return candidate
+
+        if not self.verify_images:
+            return candidate_paths[-1]
+        return None
+
+    def __len__(self) -> int:
+        return len(self._image_records)
+
+    def get_image_path(self, image_id: int) -> Optional[Path]:
+        return self._image_id_to_path.get(image_id)
+
+    def __getitem__(self, idx: int):
+        record = self._image_records[idx]
+        image_info = record["info"]
+        image_path = record["path"]
+
+        image = Image.open(image_path).convert("RGB")
+        width, height = image.size
+        annotations = self._annotations_by_image.get(image_info["id"], [])
+
+        boxes: List[List[float]] = []
+        labels: List[int] = []
+        areas: List[float] = []
+        iscrowd: List[int] = []
+
+        for ann in annotations:
+            category_id = ann.get("category_id")
+            if category_id not in self.dataset_info.category_id_to_label:
+                logging.warning("Unknown category_id=%s in %s", category_id, self.json_path)
+                continue
+
+            bbox = ann.get("bbox", [])
+            if len(bbox) != 4:
+                continue
+
+            x, y, w, h = bbox
+            x1 = max(0.0, x)
+            y1 = max(0.0, y)
+            x2 = min(float(width), x + w)
+            y2 = min(float(height), y + h)
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            boxes.append([x1, y1, x2, y2])
+            labels.append(self.dataset_info.category_id_to_label[category_id])
+            areas.append((x2 - x1) * (y2 - y1))
+            iscrowd.append(int(ann.get("iscrowd", 0)))
+
+        boxes_tensor = (
+            torch.tensor(boxes, dtype=torch.float32)
+            if boxes
+            else torch.zeros((0, 4), dtype=torch.float32)
+        )
+        labels_tensor = (
+            torch.tensor(labels, dtype=torch.int64)
+            if labels
+            else torch.zeros((0,), dtype=torch.int64)
+        )
+        areas_tensor = (
+            torch.tensor(areas, dtype=torch.float32)
+            if areas
+            else torch.zeros((0,), dtype=torch.float32)
+        )
+        iscrowd_tensor = (
+            torch.tensor(iscrowd, dtype=torch.int64)
+            if iscrowd
+            else torch.zeros((0,), dtype=torch.int64)
+        )
+
+        target: Dict[str, torch.Tensor] = {
+            "boxes": boxes_tensor,
+            "labels": labels_tensor,
+            "image_id": torch.tensor([image_info["id"]]),
+            "area": areas_tensor,
+            "iscrowd": iscrowd_tensor,
+        }
+
+        if self.transforms is not None:
+            image, target = self.transforms(image, target)
+
+        return image, target
+
+
+def build_dataloaders(
+    args: argparse.Namespace,
+    dataset_info: Optional[DatasetInfo] = None,
+) -> Tuple[DatasetInfo, DataLoader, DataLoader, DataLoader]:
+    data_root = Path(args.data_root)
+
+    def split_paths(split_name: str) -> Tuple[Path, Path]:
+        split_root = data_root / split_name
+        json_path = split_root / args.annotations_filename
+        images_dir = split_root / args.images_dirname
+        return json_path, images_dir
+
+    train_json, train_images = split_paths(args.train_dir)
+    valid_json, valid_images = split_paths(args.valid_dir)
+    test_json, test_images = split_paths(args.test_dir)
+
+    if dataset_info is None:
+        train_dataset = CocoDetectionDataset(
+            json_path=train_json,
+            images_dir=train_images,
+            transforms=get_transforms(True, args.hflip_prob),
+            verify_images=True,
+            skip_missing=args.skip_missing,
+            limit=args.limit,
+        )
+        dataset_info = train_dataset.dataset_info
+    else:
+        train_dataset = CocoDetectionDataset(
+            json_path=train_json,
+            images_dir=train_images,
+            transforms=get_transforms(True, args.hflip_prob),
+            category_id_to_label=dataset_info.category_id_to_label,
+            label_to_name=dataset_info.label_to_name,
+            verify_images=True,
+            skip_missing=args.skip_missing,
+            limit=args.limit,
+        )
+
+    valid_dataset = CocoDetectionDataset(
+        json_path=valid_json,
+        images_dir=valid_images,
+        transforms=get_transforms(False, 0.0),
+        category_id_to_label=dataset_info.category_id_to_label,
+        label_to_name=dataset_info.label_to_name,
+        verify_images=True,
+        skip_missing=args.skip_missing,
+        limit=args.limit,
+    )
+
+    test_dataset = CocoDetectionDataset(
+        json_path=test_json,
+        images_dir=test_images,
+        transforms=get_transforms(False, 0.0),
+        category_id_to_label=dataset_info.category_id_to_label,
+        label_to_name=dataset_info.label_to_name,
+        verify_images=True,
+        skip_missing=args.skip_missing,
+        limit=args.limit,
+    )
+
+    num_workers = args.num_workers
+    if os.name == "nt" and num_workers > 0:
+        logging.warning("Windows detected. Consider using --num-workers 0 for stability.")
+
+    loader_kwargs = {
+        "batch_size": args.batch_size,
+        "num_workers": num_workers,
+        "collate_fn": collate_fn,
+        "pin_memory": args.device.startswith("cuda"),
+        "persistent_workers": num_workers > 0,
+    }
+
+    train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+    valid_loader = DataLoader(valid_dataset, shuffle=False, **loader_kwargs)
+    test_loader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
+
+    return dataset_info, train_loader, valid_loader, test_loader
+
+
 def main() -> None:
     args = parse_args()
     run_id = args.run_name.strip() or datetime.now().strftime("%Y%m%d-%H%M%S")
