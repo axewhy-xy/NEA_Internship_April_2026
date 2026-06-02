@@ -31,6 +31,11 @@ The outcome of the project would be a labelled dataset with structural and archi
 9. Write a script to automatically read, check and update the metadata entries based on the changes made to the dataset. This script can be run on demand, allowing for manual user-based control whenever there is a need to update the metadata.
 10. Implement a sorting/checking algorithm to check for similar images in the train, validation and test sets to ensure that there aren't any similar augmented images between the different sets, which could potentially lead to a case of overfitting the model.
 11. Create a script to collate all the labelled data's results into a single metadata file. This script reads the labelled data from each batch, extracts the relevant information, and then combines it into a single metadata file in a structured format (e.g., CSV, JSON).
+12. Implemented a training script that can run on the GPU for faster training of the model.
+13. Implemented an evaluation metric in the training script to assess the model's performance on the validation set.
+14. Implemented a visualization function in the training script to display the bounding box results on the test images.
+15. Implemented Non-Maximum Suppression (NMS) in the training script to filter out overlapping bounding boxes and retain only the most relevant ones, which would help to improve the precision of the model's predictions and enhance its overall performance in detecting and localizing the relevant features in the images.
+16. Implemented a plotting function in the training script that can visualize the training loss and evaluation metrics over epochs, allowing for monitoring the training process and assessing how well the model is learning from the data.
 
 ## Deprecated Tasks:
 ### 1.  Write an algorithm/script to extract the relevant features from the retrieved images using image processing techniques such as edge detection, corner detection, etc.
