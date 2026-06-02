@@ -193,8 +193,6 @@ def apply_nms(
     return boxes[keep], scores[keep], labels[keep]
 
 
-
-
 def set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
@@ -241,6 +239,101 @@ def create_model(
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
     return model
+
+def visualize_predictions(
+    model: nn.Module,
+    data_loader: DataLoader,
+    dataset: CocoDetectionDataset,
+    device: torch.device,
+    output_dir: Path,
+    score_threshold: float,
+    nms_iou_threshold: float,
+    label_to_name: Dict[int, str],
+) -> None:
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError("OpenCV (cv2) is required for prediction visualization.") from exc
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model.eval()
+    with torch.no_grad():
+        for images, targets in data_loader:
+            images = [image.to(device) for image in images]
+            outputs = model(images)
+
+            for output, target in zip(outputs, targets):
+                image_id_tensor = target.get("image_id")
+                image_id = int(image_id_tensor.item()) if image_id_tensor is not None else -1
+                image_path = dataset.get_image_path(image_id)
+                if image_path is None:
+                    logging.warning("Missing image path for image_id=%s; skipping visualization.", image_id)
+                    continue
+
+                image = cv2.imread(str(image_path))
+                if image is None:
+                    logging.warning("Failed to read image %s; skipping.", image_path)
+                    continue
+
+                boxes = output["boxes"].detach().cpu()
+                scores = output["scores"].detach().cpu()
+                labels = output["labels"].detach().cpu()
+
+                keep = scores >= score_threshold
+                boxes = boxes[keep]
+                scores = scores[keep]
+                labels = labels[keep]
+
+                boxes, scores, labels = apply_nms(
+                    boxes,
+                    scores,
+                    labels,
+                    nms_iou_threshold,
+                )
+
+                for box, score, label in zip(boxes, scores, labels):
+                    x1, y1, x2, y2 = box.tolist()
+                    color = _color_from_label(int(label))
+                    cv2.rectangle(
+                        image,
+                        (int(x1), int(y1)),
+                        (int(x2), int(y2)),
+                        color,
+                        2,
+                    )
+                    label_name = label_to_name.get(int(label), str(int(label)))
+                    caption = f"{label_name} {float(score):.2f}"
+                    (text_w, text_h), baseline = cv2.getTextSize(
+                        caption,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        1,
+                    )
+                    text_x = max(0, int(x1))
+                    text_y = max(text_h + baseline + 2, int(y1) - 4)
+                    cv2.rectangle(
+                        image,
+                        (text_x, text_y - text_h - baseline),
+                        (text_x + text_w, text_y + baseline),
+                        color,
+                        -1,
+                    )
+                    cv2.putText(
+                        image,
+                        caption,
+                        (text_x, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+                output_name = f"{image_id}_{image_path.name}" if image_id >= 0 else image_path.name
+                output_path = output_dir / output_name
+                cv2.imwrite(str(output_path), image)
+
+    logging.info("Saved test prediction visualizations to %s", output_dir)
 
 
 def parse_args() -> argparse.Namespace:
