@@ -166,6 +166,34 @@ def evaluate(
         "mean_iou": mean_iou,
     }
 
+def apply_nms(
+    boxes: torch.Tensor,
+    scores: torch.Tensor,
+    labels: torch.Tensor,
+    iou_threshold: float,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if boxes.numel() == 0:
+        return boxes, scores, labels
+
+    keep_indices: List[torch.Tensor] = []
+    for label in torch.unique(labels):
+        mask = labels == label
+        if mask.sum() == 0:
+            continue
+        label_indices = torch.nonzero(mask, as_tuple=False).squeeze(1)
+        label_keep = nms(boxes[mask], scores[mask], iou_threshold)
+        keep_indices.append(label_indices[label_keep])
+
+    if not keep_indices:
+        return boxes[:0], scores[:0], labels[:0]
+
+    keep = torch.cat(keep_indices)
+    order = scores[keep].argsort(descending=True)
+    keep = keep[order]
+    return boxes[keep], scores[keep], labels[keep]
+
+
+
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
