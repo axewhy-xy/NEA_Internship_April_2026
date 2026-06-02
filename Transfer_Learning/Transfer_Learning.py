@@ -78,120 +78,6 @@ def setup_logging(output_dir: Path) -> None:
         handlers=handlers,
     )
 
-def get_plotting_backend():
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return None
-    return plt
-
-def evaluate(
-    model: nn.Module,
-    data_loader: DataLoader,
-    device: torch.device,
-    score_threshold: float,
-    iou_threshold: float,
-    nms_iou_threshold: float,
-) -> Dict[str, float]:
-    model.eval()
-    tp = fp = fn = 0
-    sum_iou = 0.0
-    match_count = 0
-
-    with torch.no_grad():
-        for images, targets in data_loader:
-            images = [image.to(device) for image in images]
-            outputs = model(images)
-
-            for output, target in zip(outputs, targets):
-                gt_boxes = target["boxes"].cpu()
-                gt_labels = target["labels"].cpu()
-
-                pred_scores = output["scores"].cpu()
-                keep = pred_scores >= score_threshold
-                pred_boxes = output["boxes"].cpu()[keep]
-                pred_labels = output["labels"].cpu()[keep]
-                pred_scores = pred_scores[keep]
-
-                pred_boxes, pred_scores, pred_labels = apply_nms(
-                    pred_boxes,
-                    pred_scores,
-                    pred_labels,
-                    nms_iou_threshold,
-                )
-
-                label_set = set(gt_labels.tolist()) | set(pred_labels.tolist())
-                for label in label_set:
-                    gt_mask = gt_labels == label
-                    pred_mask = pred_labels == label
-                    gt = gt_boxes[gt_mask]
-                    pred = pred_boxes[pred_mask]
-                    pred_score_label = pred_scores[pred_mask]
-
-                    if len(gt) == 0 and len(pred) == 0:
-                        continue
-                    if len(gt) == 0:
-                        fp += len(pred)
-                        continue
-                    if len(pred) == 0:
-                        fn += len(gt)
-                        continue
-
-                    order = torch.argsort(pred_score_label, descending=True)
-                    pred = pred[order]
-                    ious = box_iou(pred, gt)
-                    matched_gt = set()
-
-                    for pred_idx in range(pred.shape[0]):
-                        iou_row = ious[pred_idx]
-                        max_iou, gt_idx = torch.max(iou_row, dim=0)
-                        if max_iou >= iou_threshold and int(gt_idx) not in matched_gt:
-                            tp += 1
-                            matched_gt.add(int(gt_idx))
-                            sum_iou += float(max_iou)
-                            match_count += 1
-                        else:
-                            fp += 1
-
-                    fn += len(gt) - len(matched_gt)
-
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-    mean_iou = sum_iou / match_count if match_count > 0 else 0.0
-    return {
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "mean_iou": mean_iou,
-    }
-
-def apply_nms(
-    boxes: torch.Tensor,
-    scores: torch.Tensor,
-    labels: torch.Tensor,
-    iou_threshold: float,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    if boxes.numel() == 0:
-        return boxes, scores, labels
-
-    keep_indices: List[torch.Tensor] = []
-    for label in torch.unique(labels):
-        mask = labels == label
-        if mask.sum() == 0:
-            continue
-        label_indices = torch.nonzero(mask, as_tuple=False).squeeze(1)
-        label_keep = nms(boxes[mask], scores[mask], iou_threshold)
-        keep_indices.append(label_indices[label_keep])
-
-    if not keep_indices:
-        return boxes[:0], scores[:0], labels[:0]
-
-    keep = torch.cat(keep_indices)
-    order = scores[keep].argsort(descending=True)
-    keep = keep[order]
-    return boxes[keep], scores[keep], labels[keep]
-
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
@@ -200,296 +86,11 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+
 def collate_fn(batch: Iterable[Tuple[torch.Tensor, Dict[str, torch.Tensor]]]) -> Tuple[List, List]:
     images, targets = zip(*batch)
     return list(images), list(targets)
 
-def load_checkpoint(
-    checkpoint_path: Path,
-    model: nn.Module,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
-) -> Dict:
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    if "model_state" in checkpoint:
-        model.load_state_dict(checkpoint["model_state"])
-    else:
-        model.load_state_dict(checkpoint)
-
-    if optimizer is not None and "optimizer_state" in checkpoint:
-        optimizer.load_state_dict(checkpoint["optimizer_state"])
-    if scheduler is not None and checkpoint.get("scheduler_state") is not None:
-        scheduler.load_state_dict(checkpoint["scheduler_state"])
-    return checkpoint
-
-def create_model(
-    num_classes: int,
-    pretrained: bool,
-    trainable_backbone_layers: int,
-    min_size: Optional[int],
-    max_size: Optional[int],
-) -> nn.Module:
-    weights = FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT if pretrained else None
-    kwargs = {"trainable_backbone_layers": trainable_backbone_layers}
-    if min_size is not None:
-        kwargs["min_size"] = min_size
-    if max_size is not None:
-        kwargs["max_size"] = max_size
-    model = fasterrcnn_resnet50_fpn_v2(weights=weights, **kwargs)
-    in_features = model.roi_heads.box_predictor.cls_score.in_features
-    model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
-    return model
-
-def move_targets_to_device(targets: List[Dict[str, torch.Tensor]], device: torch.device):
-    moved = []
-    for target in targets:
-        moved.append({key: value.to(device) for key, value in target.items()})
-    return moved
-
-def compute_validation_loss(
-    model: nn.Module,
-    data_loader: DataLoader,
-    device: torch.device,
-    use_amp: bool,
-) -> float:
-    module_training_states = [(module, module.training) for module in model.modules()]
-    model.train()
-
-    eval_only_modules = (
-        nn.modules.batchnorm._BatchNorm,
-        nn.modules.dropout._DropoutNd,
-    )
-
-    def set_eval_for_validation(module: nn.Module) -> None:
-        if isinstance(module, eval_only_modules):
-            module.eval()
-
-    model.apply(set_eval_for_validation)
-    running_loss = 0.0
-    amp_enabled = use_amp and device.type == "cuda"
-
-    try:
-        with torch.no_grad():
-            for images, targets in data_loader:
-                images = [image.to(device) for image in images]
-                targets = move_targets_to_device(targets, device)
-                with torch.cuda.amp.autocast(enabled=amp_enabled):
-                    loss_dict = model(images, targets)
-                    losses = sum(loss for loss in loss_dict.values())
-
-                if not torch.isfinite(losses):
-                    raise ValueError(f"Non-finite loss detected: {losses.item():.6f}")
-
-                running_loss += losses.item()
-    finally:
-        for module, was_training in module_training_states:
-            module.train(was_training)
-
-    return running_loss / max(1, len(data_loader))
-
-
-def train_one_epoch(
-    model: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    data_loader: DataLoader,
-    device: torch.device,
-    epoch: int,
-    scaler: Optional[torch.cuda.amp.GradScaler],
-    max_norm: float,
-    print_freq: int,
-) -> float:
-    model.train()
-    running_loss = 0.0
-    for step, (images, targets) in enumerate(data_loader):
-        images = [image.to(device) for image in images]
-        targets = move_targets_to_device(targets, device)
-
-        amp_enabled = scaler is not None and scaler.is_enabled()
-        with torch.cuda.amp.autocast(enabled=amp_enabled):
-            loss_dict = model(images, targets)
-            losses = sum(loss for loss in loss_dict.values())
-
-        if not torch.isfinite(losses):
-            raise ValueError(f"Non-finite loss detected: {losses.item():.6f}")
-
-        optimizer.zero_grad(set_to_none=True)
-        if amp_enabled:
-            scaler.scale(losses).backward()
-            scaler.unscale_(optimizer)
-            if max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            losses.backward()
-            if max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-            optimizer.step()
-
-        running_loss += losses.item()
-        if (step + 1) % print_freq == 0:
-            avg_loss = running_loss / (step + 1)
-            logging.info("Epoch %d | Step %d/%d | Loss %.4f", epoch, step + 1, len(data_loader), avg_loss)
-
-    return running_loss / max(1, len(data_loader))
-
-
-def _color_from_label(label: int) -> Tuple[int, int, int]:
-    return (
-        int((37 * label) % 255),
-        int((17 * label) % 255),
-        int((29 * label) % 255),
-    )
-
-def visualize_predictions(
-    model: nn.Module,
-    data_loader: DataLoader,
-    dataset: CocoDetectionDataset,
-    device: torch.device,
-    output_dir: Path,
-    score_threshold: float,
-    nms_iou_threshold: float,
-    label_to_name: Dict[int, str],
-) -> None:
-    try:
-        import cv2
-    except ImportError as exc:
-        raise RuntimeError("OpenCV (cv2) is required for prediction visualization.") from exc
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    model.eval()
-    with torch.no_grad():
-        for images, targets in data_loader:
-            images = [image.to(device) for image in images]
-            outputs = model(images)
-
-            for output, target in zip(outputs, targets):
-                image_id_tensor = target.get("image_id")
-                image_id = int(image_id_tensor.item()) if image_id_tensor is not None else -1
-                image_path = dataset.get_image_path(image_id)
-                if image_path is None:
-                    logging.warning("Missing image path for image_id=%s; skipping visualization.", image_id)
-                    continue
-
-                image = cv2.imread(str(image_path))
-                if image is None:
-                    logging.warning("Failed to read image %s; skipping.", image_path)
-                    continue
-
-                boxes = output["boxes"].detach().cpu()
-                scores = output["scores"].detach().cpu()
-                labels = output["labels"].detach().cpu()
-
-                keep = scores >= score_threshold
-                boxes = boxes[keep]
-                scores = scores[keep]
-                labels = labels[keep]
-
-                boxes, scores, labels = apply_nms(
-                    boxes,
-                    scores,
-                    labels,
-                    nms_iou_threshold,
-                )
-
-                for box, score, label in zip(boxes, scores, labels):
-                    x1, y1, x2, y2 = box.tolist()
-                    color = _color_from_label(int(label))
-                    cv2.rectangle(
-                        image,
-                        (int(x1), int(y1)),
-                        (int(x2), int(y2)),
-                        color,
-                        2,
-                    )
-                    label_name = label_to_name.get(int(label), str(int(label)))
-                    caption = f"{label_name} {float(score):.2f}"
-                    (text_w, text_h), baseline = cv2.getTextSize(
-                        caption,
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        1,
-                    )
-                    text_x = max(0, int(x1))
-                    text_y = max(text_h + baseline + 2, int(y1) - 4)
-                    cv2.rectangle(
-                        image,
-                        (text_x, text_y - text_h - baseline),
-                        (text_x + text_w, text_y + baseline),
-                        color,
-                        -1,
-                    )
-                    cv2.putText(
-                        image,
-                        caption,
-                        (text_x, text_y),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 255),
-                        1,
-                        cv2.LINE_AA,
-                    )
-
-                output_name = f"{image_id}_{image_path.name}" if image_id >= 0 else image_path.name
-                output_path = output_dir / output_name
-                cv2.imwrite(str(output_path), image)
-
-    logging.info("Saved test prediction visualizations to %s", output_dir)
-
-
-def parse_args() -> argparse.Namespace:
-    script_dir = Path(__file__).resolve().parent
-    default_data_root = script_dir.parent / "Labelled_Dataset"
-    default_output_root = script_dir / "runs"
-
-    parser = argparse.ArgumentParser(description="Train and evaluate Faster R-CNN on a COCO-style dataset.")
-    parser.add_argument("--data-root", type=str, default=str(default_data_root), help="Root directory containing train/valid/test subdirectories with JSON annotations and images.")
-    parser.add_argument("--train-dir", type=str, default="train", help="Name of the training subdirectory.")
-    parser.add_argument("--valid-dir", type=str, default="valid", help="Name of the validation subdirectory.")
-    parser.add_argument("--test-dir", type=str, default="test", help="Name of the test subdirectory.")
-    parser.add_argument("--annotations-filename", type=str, default="result.json", help="Name of the JSON annotations file.")
-    parser.add_argument("--images-dirname", type=str, default="images", help="Name of the images subdirectory.")
-    parser.add_argument("--output-root", type=str, default=str(default_output_root), help="Root directory for saving outputs.")
-    parser.add_argument("--run-name", type=str, default="", help="Name of the run for logging and saving purposes.")
-
-    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs.")
-    parser.add_argument("--batch-size", type=int, default=4, help="Batch size for training and validation.")
-    parser.add_argument("--num-workers", type=int, default=0 if os.name == "nt" else 4, help="Number of worker processes for data loading.")
-    parser.add_argument("--learning-rate", type=float, default=0.005, help="Learning rate for the optimizer.")
-    parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for the optimizer.")
-    parser.add_argument("--weight-decay", type=float, default=0.0005, help="Weight decay for the optimizer.")
-    parser.add_argument("--lr-step-size", type=int, default=3, help="Step size for the learning rate scheduler.")
-    parser.add_argument("--lr-gamma", type=float, default=0.5, help="Gamma for the learning rate scheduler.")
-    parser.add_argument("--max-grad-norm", type=float, default=10.0, help="Maximum norm for gradient clipping.")
-
-    parser.add_argument("--trainable-backbone-layers", type=int, default=3, help="Number of trainable backbone layers.")
-    parser.add_argument("--min-size", type=int, default=None, help="Minimum image size.")
-    parser.add_argument("--max-size", type=int, default=None, help="Maximum image size.")
-    parser.add_argument("--no-pretrained", action="store_true", help="Do not use pretrained weights.")
-
-    parser.add_argument("--score-threshold", type=float, default=0.5, help="Minimum score threshold for detections.")
-    parser.add_argument("--iou-threshold", type=float, default=0.5, help="Minimum IoU threshold for detections.")
-    parser.add_argument("--nms-iou-threshold", type=float, default=0.5, help="IoU threshold for non-maximum suppression.")
-    parser.add_argument("--hflip-prob", type=float, default=0.5, help="Probability of horizontal flip augmentation.")
-
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use for training.")
-    parser.add_argument("--amp", action="store_true", help="Use automatic mixed precision.")
-    parser.add_argument("--print-freq", type=int, default=20, help="Frequency of printing training progress.")
-    parser.add_argument("--limit", type=int, default=0, help="Limit the number of samples for debugging.")
-    parser.add_argument("--skip-missing", action="store_true", help="Skip missing images during training.")
-
-    parser.add_argument("--resume", type=str, default="", help="Path to checkpoint to resume training from.")
-    parser.add_argument("--test-only", action="store_true", help="Run evaluation only.")
-    parser.add_argument("--skip-test", action="store_true", help="Skip test evaluation after training.")
-    parser.add_argument("--save-every", type=int, default=0, help="Save checkpoint every N epochs.")
-
-    return parser.parse_args()
-
-@dataclass
-class DatasetInfo:
-    category_id_to_label: Dict[int, int]
-    label_to_name: Dict[int, str]
 
 class Compose:
     def __init__(self, transforms: List):
@@ -526,6 +127,12 @@ def get_transforms(train: bool, hflip_prob: float) -> Compose:
     if train and hflip_prob > 0:
         transforms.insert(0, RandomHorizontalFlip(hflip_prob))
     return Compose(transforms)
+
+
+@dataclass
+class DatasetInfo:
+    category_id_to_label: Dict[int, int]
+    label_to_name: Dict[int, str]
 
 
 class CocoDetectionDataset(Dataset):
@@ -698,6 +305,434 @@ class CocoDetectionDataset(Dataset):
         return image, target
 
 
+def create_model(
+    num_classes: int,
+    pretrained: bool,
+    trainable_backbone_layers: int,
+    min_size: Optional[int],
+    max_size: Optional[int],
+) -> nn.Module:
+    weights = FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT if pretrained else None
+    kwargs = {"trainable_backbone_layers": trainable_backbone_layers}
+    if min_size is not None:
+        kwargs["min_size"] = min_size
+    if max_size is not None:
+        kwargs["max_size"] = max_size
+    model = fasterrcnn_resnet50_fpn_v2(weights=weights, **kwargs)
+    in_features = model.roi_heads.box_predictor.cls_score.in_features
+    model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+    return model
+
+
+def move_targets_to_device(targets: List[Dict[str, torch.Tensor]], device: torch.device):
+    moved = []
+    for target in targets:
+        moved.append({key: value.to(device) for key, value in target.items()})
+    return moved
+
+
+def train_one_epoch(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    data_loader: DataLoader,
+    device: torch.device,
+    epoch: int,
+    scaler: Optional[torch.cuda.amp.GradScaler],
+    max_norm: float,
+    print_freq: int,
+) -> float:
+    model.train()
+    running_loss = 0.0
+    for step, (images, targets) in enumerate(data_loader):
+        images = [image.to(device) for image in images]
+        targets = move_targets_to_device(targets, device)
+
+        amp_enabled = scaler is not None and scaler.is_enabled()
+        with torch.cuda.amp.autocast(enabled=amp_enabled):
+            loss_dict = model(images, targets)
+            losses = sum(loss for loss in loss_dict.values())
+
+        if not torch.isfinite(losses):
+            raise ValueError(f"Non-finite loss detected: {losses.item():.6f}")
+
+        optimizer.zero_grad(set_to_none=True)
+        if amp_enabled:
+            scaler.scale(losses).backward()
+            scaler.unscale_(optimizer)
+            if max_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            losses.backward()
+            if max_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+            optimizer.step()
+
+        running_loss += losses.item()
+        if (step + 1) % print_freq == 0:
+            avg_loss = running_loss / (step + 1)
+            logging.info("Epoch %d | Step %d/%d | Loss %.4f", epoch, step + 1, len(data_loader), avg_loss)
+
+    return running_loss / max(1, len(data_loader))
+
+ 
+def compute_validation_loss(
+    model: nn.Module,
+    data_loader: DataLoader,
+    device: torch.device,
+    use_amp: bool,
+) -> float:
+    module_training_states = [(module, module.training) for module in model.modules()]
+    model.train()
+
+    eval_only_modules = (
+        nn.modules.batchnorm._BatchNorm,
+        nn.modules.dropout._DropoutNd,
+    )
+
+    def set_eval_for_validation(module: nn.Module) -> None:
+        if isinstance(module, eval_only_modules):
+            module.eval()
+
+    model.apply(set_eval_for_validation)
+    running_loss = 0.0
+    amp_enabled = use_amp and device.type == "cuda"
+
+    try:
+        with torch.no_grad():
+            for images, targets in data_loader:
+                images = [image.to(device) for image in images]
+                targets = move_targets_to_device(targets, device)
+                with torch.cuda.amp.autocast(enabled=amp_enabled):
+                    loss_dict = model(images, targets)
+                    losses = sum(loss for loss in loss_dict.values())
+
+                if not torch.isfinite(losses):
+                    raise ValueError(f"Non-finite loss detected: {losses.item():.6f}")
+
+                running_loss += losses.item()
+    finally:
+        for module, was_training in module_training_states:
+            module.train(was_training)
+
+    return running_loss / max(1, len(data_loader))
+
+
+def evaluate(
+    model: nn.Module,
+    data_loader: DataLoader,
+    device: torch.device,
+    score_threshold: float,
+    iou_threshold: float,
+    nms_iou_threshold: float,
+) -> Dict[str, float]:
+    model.eval()
+    tp = fp = fn = 0
+    sum_iou = 0.0
+    match_count = 0
+
+    with torch.no_grad():
+        for images, targets in data_loader:
+            images = [image.to(device) for image in images]
+            outputs = model(images)
+
+            for output, target in zip(outputs, targets):
+                gt_boxes = target["boxes"].cpu()
+                gt_labels = target["labels"].cpu()
+
+                pred_scores = output["scores"].cpu()
+                keep = pred_scores >= score_threshold
+                pred_boxes = output["boxes"].cpu()[keep]
+                pred_labels = output["labels"].cpu()[keep]
+                pred_scores = pred_scores[keep]
+
+                pred_boxes, pred_scores, pred_labels = apply_nms(
+                    pred_boxes,
+                    pred_scores,
+                    pred_labels,
+                    nms_iou_threshold,
+                )
+
+                label_set = set(gt_labels.tolist()) | set(pred_labels.tolist())
+                for label in label_set:
+                    gt_mask = gt_labels == label
+                    pred_mask = pred_labels == label
+                    gt = gt_boxes[gt_mask]
+                    pred = pred_boxes[pred_mask]
+                    pred_score_label = pred_scores[pred_mask]
+
+                    if len(gt) == 0 and len(pred) == 0:
+                        continue
+                    if len(gt) == 0:
+                        fp += len(pred)
+                        continue
+                    if len(pred) == 0:
+                        fn += len(gt)
+                        continue
+
+                    order = torch.argsort(pred_score_label, descending=True)
+                    pred = pred[order]
+                    ious = box_iou(pred, gt)
+                    matched_gt = set()
+
+                    for pred_idx in range(pred.shape[0]):
+                        iou_row = ious[pred_idx]
+                        max_iou, gt_idx = torch.max(iou_row, dim=0)
+                        if max_iou >= iou_threshold and int(gt_idx) not in matched_gt:
+                            tp += 1
+                            matched_gt.add(int(gt_idx))
+                            sum_iou += float(max_iou)
+                            match_count += 1
+                        else:
+                            fp += 1
+
+                    fn += len(gt) - len(matched_gt)
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    mean_iou = sum_iou / match_count if match_count > 0 else 0.0
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "mean_iou": mean_iou,
+    }
+
+
+def get_plotting_backend():
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    return plt
+
+
+def save_training_plots(
+    history: Dict[str, List[float]],
+    output_dir: Path,
+    plt,
+) -> None:
+    if not history.get("train_loss"):
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    epochs = list(range(1, len(history["train_loss"]) + 1))
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(epochs, history["train_loss"], label="Train loss")
+    if history.get("val_loss"):
+        ax.plot(epochs, history["val_loss"], label="Val loss")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_title("Training vs Validation Loss")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(output_dir / "loss_curve.png", dpi=200)
+    plt.close(fig)
+
+    metric_keys = [
+        ("precision", "Precision"),
+        ("recall", "Recall"),
+        ("f1", "F1"),
+        ("mean_iou", "Mean IoU"),
+    ]
+    if any(history.get(key) for key, _ in metric_keys):
+        fig, ax = plt.subplots(figsize=(7, 4))
+        for key, label in metric_keys:
+            values = history.get(key, [])
+            if values:
+                ax.plot(epochs[: len(values)], values, label=label)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Score")
+        ax.set_ylim(0.0, 1.0)
+        ax.set_title("Validation Metrics")
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(output_dir / "metrics_curve.png", dpi=200)
+        plt.close(fig)
+
+
+def _color_from_label(label: int) -> Tuple[int, int, int]:
+    return (
+        int((37 * label) % 255),
+        int((17 * label) % 255),
+        int((29 * label) % 255),
+    )
+
+
+def visualize_predictions(
+    model: nn.Module,
+    data_loader: DataLoader,
+    dataset: CocoDetectionDataset,
+    device: torch.device,
+    output_dir: Path,
+    score_threshold: float,
+    nms_iou_threshold: float,
+    label_to_name: Dict[int, str],
+) -> None:
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError("OpenCV (cv2) is required for prediction visualization.") from exc
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model.eval()
+    with torch.no_grad():
+        for images, targets in data_loader:
+            images = [image.to(device) for image in images]
+            outputs = model(images)
+
+            for output, target in zip(outputs, targets):
+                image_id_tensor = target.get("image_id")
+                image_id = int(image_id_tensor.item()) if image_id_tensor is not None else -1
+                image_path = dataset.get_image_path(image_id)
+                if image_path is None:
+                    logging.warning("Missing image path for image_id=%s; skipping visualization.", image_id)
+                    continue
+
+                image = cv2.imread(str(image_path))
+                if image is None:
+                    logging.warning("Failed to read image %s; skipping.", image_path)
+                    continue
+
+                boxes = output["boxes"].detach().cpu()
+                scores = output["scores"].detach().cpu()
+                labels = output["labels"].detach().cpu()
+
+                keep = scores >= score_threshold
+                boxes = boxes[keep]
+                scores = scores[keep]
+                labels = labels[keep]
+
+                boxes, scores, labels = apply_nms(
+                    boxes,
+                    scores,
+                    labels,
+                    nms_iou_threshold,
+                )
+
+                for box, score, label in zip(boxes, scores, labels):
+                    x1, y1, x2, y2 = box.tolist()
+                    color = _color_from_label(int(label))
+                    cv2.rectangle(
+                        image,
+                        (int(x1), int(y1)),
+                        (int(x2), int(y2)),
+                        color,
+                        2,
+                    )
+                    label_name = label_to_name.get(int(label), str(int(label)))
+                    caption = f"{label_name} {float(score):.2f}"
+                    (text_w, text_h), baseline = cv2.getTextSize(
+                        caption,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        1,
+                    )
+                    text_x = max(0, int(x1))
+                    text_y = max(text_h + baseline + 2, int(y1) - 4)
+                    cv2.rectangle(
+                        image,
+                        (text_x, text_y - text_h - baseline),
+                        (text_x + text_w, text_y + baseline),
+                        color,
+                        -1,
+                    )
+                    cv2.putText(
+                        image,
+                        caption,
+                        (text_x, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+                output_name = f"{image_id}_{image_path.name}" if image_id >= 0 else image_path.name
+                output_path = output_dir / output_name
+                cv2.imwrite(str(output_path), image)
+
+    logging.info("Saved test prediction visualizations to %s", output_dir)
+
+
+def save_checkpoint(
+    output_dir: Path,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler],
+    epoch: int,
+    best_metric: float,
+    dataset_info: DatasetInfo,
+    is_best: bool,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    state = {
+        "epoch": epoch,
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "scheduler_state": scheduler.state_dict() if scheduler is not None else None,
+        "best_metric": best_metric,
+        "category_id_to_label": dataset_info.category_id_to_label,
+        "label_to_name": dataset_info.label_to_name,
+    }
+    last_path = output_dir / "model_last.pth"
+    torch.save(state, last_path)
+    if is_best:
+        best_path = output_dir / "model_best.pth"
+        torch.save(state, best_path)
+
+
+def load_checkpoint(
+    checkpoint_path: Path,
+    model: nn.Module,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+) -> Dict:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    if "model_state" in checkpoint:
+        model.load_state_dict(checkpoint["model_state"])
+    else:
+        model.load_state_dict(checkpoint)
+
+    if optimizer is not None and "optimizer_state" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
+    if scheduler is not None and checkpoint.get("scheduler_state") is not None:
+        scheduler.load_state_dict(checkpoint["scheduler_state"])
+    return checkpoint
+
+
+def apply_nms(
+    boxes: torch.Tensor,
+    scores: torch.Tensor,
+    labels: torch.Tensor,
+    iou_threshold: float,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if boxes.numel() == 0:
+        return boxes, scores, labels
+
+    keep_indices: List[torch.Tensor] = []
+    for label in torch.unique(labels):
+        mask = labels == label
+        if mask.sum() == 0:
+            continue
+        label_indices = torch.nonzero(mask, as_tuple=False).squeeze(1)
+        label_keep = nms(boxes[mask], scores[mask], iou_threshold)
+        keep_indices.append(label_indices[label_keep])
+
+    if not keep_indices:
+        return boxes[:0], scores[:0], labels[:0]
+
+    keep = torch.cat(keep_indices)
+    order = scores[keep].argsort(descending=True)
+    keep = keep[order]
+    return boxes[keep], scores[keep], labels[keep]
+
+
 def build_dataloaders(
     args: argparse.Namespace,
     dataset_info: Optional[DatasetInfo] = None,
@@ -775,6 +810,56 @@ def build_dataloaders(
     test_loader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
 
     return dataset_info, train_loader, valid_loader, test_loader
+
+
+def parse_args() -> argparse.Namespace:
+    script_dir = Path(__file__).resolve().parent
+    default_data_root = script_dir.parent / "Labelled_Dataset"
+    default_output_root = script_dir / "runs"
+
+    parser = argparse.ArgumentParser(description="Train and evaluate Faster R-CNN on a COCO-style dataset.")
+    parser.add_argument("--data-root", type=str, default=str(default_data_root), help="Root directory containing train/valid/test subdirectories with JSON annotations and images.")
+    parser.add_argument("--train-dir", type=str, default="train", help="Name of the training subdirectory.")
+    parser.add_argument("--valid-dir", type=str, default="valid", help="Name of the validation subdirectory.")
+    parser.add_argument("--test-dir", type=str, default="test", help="Name of the test subdirectory.")
+    parser.add_argument("--annotations-filename", type=str, default="result.json", help="Name of the JSON annotations file.")
+    parser.add_argument("--images-dirname", type=str, default="images", help="Name of the images subdirectory.")
+    parser.add_argument("--output-root", type=str, default=str(default_output_root), help="Root directory for saving outputs.")
+    parser.add_argument("--run-name", type=str, default="", help="Name of the run for logging and saving purposes.")
+
+    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs.")
+    parser.add_argument("--batch-size", type=int, default=4, help="Batch size for training and validation.")
+    parser.add_argument("--num-workers", type=int, default=0 if os.name == "nt" else 4, help="Number of worker processes for data loading.")
+    parser.add_argument("--learning-rate", type=float, default=0.005, help="Learning rate for the optimizer.")
+    parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for the optimizer.")
+    parser.add_argument("--weight-decay", type=float, default=0.0005, help="Weight decay for the optimizer.")
+    parser.add_argument("--lr-step-size", type=int, default=3, help="Step size for the learning rate scheduler.")
+    parser.add_argument("--lr-gamma", type=float, default=0.5, help="Gamma for the learning rate scheduler.")
+    parser.add_argument("--max-grad-norm", type=float, default=10.0, help="Maximum norm for gradient clipping.")
+
+    parser.add_argument("--trainable-backbone-layers", type=int, default=3, help="Number of trainable backbone layers.")
+    parser.add_argument("--min-size", type=int, default=None, help="Minimum image size.")
+    parser.add_argument("--max-size", type=int, default=None, help="Maximum image size.")
+    parser.add_argument("--no-pretrained", action="store_true", help="Do not use pretrained weights.")
+
+    parser.add_argument("--score-threshold", type=float, default=0.5, help="Minimum score threshold for detections.")
+    parser.add_argument("--iou-threshold", type=float, default=0.5, help="Minimum IoU threshold for detections.")
+    parser.add_argument("--nms-iou-threshold", type=float, default=0.5, help="IoU threshold for non-maximum suppression.")
+    parser.add_argument("--hflip-prob", type=float, default=0.5, help="Probability of horizontal flip augmentation.")
+
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use for training.")
+    parser.add_argument("--amp", action="store_true", help="Use automatic mixed precision.")
+    parser.add_argument("--print-freq", type=int, default=20, help="Frequency of printing training progress.")
+    parser.add_argument("--limit", type=int, default=0, help="Limit the number of samples for debugging.")
+    parser.add_argument("--skip-missing", action="store_true", help="Skip missing images during training.")
+
+    parser.add_argument("--resume", type=str, default="", help="Path to checkpoint to resume training from.")
+    parser.add_argument("--test-only", action="store_true", help="Run evaluation only.")
+    parser.add_argument("--skip-test", action="store_true", help="Skip test evaluation after training.")
+    parser.add_argument("--save-every", type=int, default=0, help="Save checkpoint every N epochs.")
+
+    return parser.parse_args()
 
 
 def main() -> None:
