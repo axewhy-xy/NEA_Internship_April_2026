@@ -136,6 +136,9 @@ To mitigate this issue, there is a need to implement Non-Maximum Suppression (NM
 ### 15. Training script unable to plot graphical results: (2026-06-04)
 To mitigate this issue, there is a need to implement a plotting function in the training script that can visualize the training loss and evaluation metrics over epochs. This would allow for tracking the model's performance during training and making informed decisions about adjustments to the training process to improve the model's performance. By implementing this solution, it will be possible to monitor the training process and assess how well the model is learning from the data, which is an important aspect of model development.
 
+### 16. Training script unable to test model on unseen/non-labelled data: (2026-06-05)
+To mitigate this issue, there is a need to implement functionality in the training script for testing the trained model on unseen/non-labelled data. This would involve loading the best model and running a new, unlabelled dataset through it to get predictions. By implementing this solution, it will be possible to assess the model's performance on a deployment-like scenario where it would encounter new data that it has not seen during training, which is an important aspect of model evaluation. One possible approach to implementing this functionality could be to create a separate function in the training script that takes in a new dataset/images, loads the best model, and runs the new, unlabelled dataset through the model to get predictions. This would allow for testing the model on unseen data and evaluating its performance in a more realistic scenario.
+
 ## Problem Resolution:
 ### 1. Low satellite imagery resolution:
 Retrieved images by using Google Map Tile API instead. The image was retrieved using the satellite tile by calling the Google Map Tile API, which provided a much clearer image of the HDB roofings, allowing for better labelling of the dataset.
