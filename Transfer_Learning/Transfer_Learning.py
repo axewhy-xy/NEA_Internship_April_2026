@@ -67,6 +67,31 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import box_iou, nms
 from torchvision.transforms import functional as F
 
+
+def setup_logging(output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_path = output_dir / "train.log"
+    handlers = [logging.StreamHandler(), logging.FileHandler(log_path, mode="a", encoding="utf-8")]
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        handlers=handlers,
+    )
+
+def get_plotting_backend():
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    return plt
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 def parse_args() -> argparse.Namespace:
     script_dir = Path(__file__).resolve().parent
     default_data_root = script_dir.parent / "Labelled_Dataset"
