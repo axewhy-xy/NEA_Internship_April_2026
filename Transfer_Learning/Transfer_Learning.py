@@ -26,6 +26,9 @@ python Transfer_Learning.py --run-name my_experiment --resume path/to/model_last
 To evaluate a trained model on the test set:
 python Transfer_Learning.py --run-name my_experiment --resume path/to/model_best.pth --test-only
 
+To run inference on unlabeled images in a directory:
+python Transfer_Learning.py --run-name my_experiment --resume path/to/model_best.pth --test-deploy path/to/images --deploy-output path/to/output
+
 For more options and configurations, use:
 python Transfer_Learning.py --help
 
@@ -1033,6 +1036,156 @@ def visualize_predictions(
 
 """
 # ----------------------------------------------------------------------------------------------------
+# run_deploy_inference()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function runs inference on a directory of unlabeled images and saves annotated predictions.
+It loads images from the given directory (recursively), runs the model to get detections, applies
+score thresholding and NMS, and draws bounding boxes and labels onto the images using OpenCV.
+
+Args:
+- model (nn.Module): The trained model to use for inference.
+- images_dir (Path): Root directory containing images to run inference on.
+- output_dir (Path): Directory where annotated images will be saved.
+- device (torch.device): Device to run the model on.
+- score_threshold (float): Minimum confidence score for predictions.
+- nms_iou_threshold (float): IoU threshold for non-maximum suppression.
+- label_to_name (Dict[int, str]): Mapping from label indices to names.
+- batch_size (int): Batch size for inference.
+- use_amp (bool): Whether to use automatic mixed precision for inference.
+
+Returns:
+- None
+
+"""
+def run_deploy_inference(
+    model: nn.Module,
+    images_dir: Path,
+    output_dir: Path,
+    device: torch.device,
+    score_threshold: float,
+    nms_iou_threshold: float,
+    label_to_name: Dict[int, str],
+    batch_size: int,
+    use_amp: bool,
+) -> None:
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError("OpenCV (cv2) is required for deployment visualization.") from exc
+
+    valid_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+    image_paths = sorted(
+        [
+            path
+            for path in images_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in valid_exts
+        ]
+    )
+
+    if not image_paths:
+        logging.warning("No images found in %s", images_dir)
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model.eval()
+    amp_enabled = use_amp and device.type == "cuda"
+
+    def iter_batches(items: List[Path], size: int):
+        step = max(1, size)
+        for i in range(0, len(items), step):
+            yield items[i : i + step]
+
+    with torch.no_grad():
+        for batch_paths in iter_batches(image_paths, batch_size):
+            batch_items: List[Tuple[Path, torch.Tensor]] = []
+            for image_path in batch_paths:
+                try:
+                    pil_image = Image.open(image_path).convert("RGB")
+                except Exception as exc:
+                    logging.warning("Failed to open image %s: %s", image_path, exc)
+                    continue
+                batch_items.append((image_path, F.to_tensor(pil_image)))
+
+            if not batch_items:
+                continue
+
+            images = [item[1].to(device) for item in batch_items]
+            with torch.cuda.amp.autocast(enabled=amp_enabled):
+                outputs = model(images)
+
+            for (image_path, _), output in zip(batch_items, outputs):
+                image = cv2.imread(str(image_path))
+                if image is None:
+                    logging.warning("Failed to read image %s; skipping.", image_path)
+                    continue
+
+                boxes = output["boxes"].detach().cpu()
+                scores = output["scores"].detach().cpu()
+                labels = output["labels"].detach().cpu()
+
+                keep = scores >= score_threshold
+                boxes = boxes[keep]
+                scores = scores[keep]
+                labels = labels[keep]
+
+                boxes, scores, labels = apply_nms(
+                    boxes,
+                    scores,
+                    labels,
+                    nms_iou_threshold,
+                )
+
+                for box, score, label in zip(boxes, scores, labels):
+                    x1, y1, x2, y2 = box.tolist()
+                    color = _color_from_label(int(label))
+                    cv2.rectangle(
+                        image,
+                        (int(x1), int(y1)),
+                        (int(x2), int(y2)),
+                        color,
+                        2,
+                    )
+                    label_name = label_to_name.get(int(label), str(int(label)))
+                    caption = f"{label_name} {float(score):.2f}"
+                    (text_w, text_h), baseline = cv2.getTextSize(
+                        caption,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        1,
+                    )
+                    text_x = max(0, int(x1))
+                    text_y = max(text_h + baseline + 2, int(y1) - 4)
+                    cv2.rectangle(
+                        image,
+                        (text_x, text_y - text_h - baseline),
+                        (text_x + text_w, text_y + baseline),
+                        color,
+                        -1,
+                    )
+                    cv2.putText(
+                        image,
+                        caption,
+                        (text_x, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+                try:
+                    rel_path = image_path.relative_to(images_dir)
+                    output_path = output_dir / rel_path
+                except ValueError:
+                    output_path = output_dir / image_path.name
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(output_path), image)
+
+    logging.info("Saved deploy predictions to %s", output_dir)
+
+"""
+# ----------------------------------------------------------------------------------------------------
 # save_checkpoint()
 # ----------------------------------------------------------------------------------------------------
 Description:
@@ -1126,6 +1279,30 @@ def load_checkpoint(
     if scheduler is not None and checkpoint.get("scheduler_state") is not None:
         scheduler.load_state_dict(checkpoint["scheduler_state"])
     return checkpoint
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# _infer_num_classes_from_state_dict()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper function attempts to infer the number of classes from a Faster R-CNN state dict by
+inspecting the classifier layer dimensions.
+
+Args:
+- state_dict (Dict[str, torch.Tensor]): Model state dict.
+
+Returns:
+- Optional[int]: The inferred number of classes if available.
+
+"""
+def _infer_num_classes_from_state_dict(state_dict: Dict[str, torch.Tensor]) -> Optional[int]:
+    key = "roi_heads.box_predictor.cls_score.weight"
+    if key in state_dict and hasattr(state_dict[key], "shape"):
+        return int(state_dict[key].shape[0])
+    key = "roi_heads.box_predictor.cls_score.bias"
+    if key in state_dict and hasattr(state_dict[key], "shape"):
+        return int(state_dict[key].shape[0])
+    return None
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -1339,9 +1516,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-missing", action="store_true", help="Skip missing images during training.")
 
     parser.add_argument("--resume", type=str, default="", help="Path to checkpoint to resume training from.")
-    parser.add_argument("--test-only", action="store_true", help="Run evaluation only.")
+    parser.add_argument("--test-only", action="store_true", help="Run evaluation on the test dataset only.")
     parser.add_argument("--skip-test", action="store_true", help="Skip test evaluation after training.")
     parser.add_argument("--save-every", type=int, default=0, help="Save checkpoint every N epochs.")
+    parser.add_argument("--test-deploy", type=str, default="", help="Directory of unlabeled images for deployment inference. If set, training and test evaluation are skipped.")
+    parser.add_argument("--deploy-output", type=str, default="", help="Output directory for deployment predictions (default: <output_root>/<run_name>/deploy_predictions).")
 
     return parser.parse_args()
 
@@ -1389,6 +1568,88 @@ def main() -> None:
         device = torch.device("cpu")
     else:
         logging.info("Using CUDA device: %s", device)
+
+    if args.test_deploy:
+        deploy_dir = Path(args.test_deploy)
+        if not deploy_dir.exists() or not deploy_dir.is_dir():
+            logging.error("Deployment directory does not exist or is not a directory: %s", deploy_dir)
+            return
+
+        checkpoint_path: Optional[Path] = None
+        if args.resume:
+            checkpoint_path = Path(args.resume)
+        elif args.run_name:
+            run_dir = Path(args.output_root) / args.run_name
+            best_candidate = run_dir / "model_best.pth"
+            last_candidate = run_dir / "model_last.pth"
+            if best_candidate.exists():
+                checkpoint_path = best_candidate
+            elif last_candidate.exists():
+                logging.warning("Best checkpoint not found; using %s", last_candidate)
+                checkpoint_path = last_candidate
+
+        if checkpoint_path is None or not checkpoint_path.exists():
+            logging.error("Checkpoint not found. Provide --resume or ensure <output_root>/<run_name>/model_best.pth exists.")
+            return
+
+        checkpoint_data = torch.load(checkpoint_path, map_location="cpu")
+        state_dict = checkpoint_data.get("model_state", checkpoint_data)
+        raw_label_to_name = checkpoint_data.get("label_to_name", {}) or {}
+        label_to_name: Dict[int, str] = {}
+        if isinstance(raw_label_to_name, dict):
+            for key, value in raw_label_to_name.items():
+                try:
+                    label_id = int(key)
+                except (TypeError, ValueError):
+                    continue
+                label_to_name[label_id] = str(value)
+
+        num_classes = len(label_to_name) + 1 if label_to_name else None
+        if num_classes is None:
+            raw_category_id_to_label = checkpoint_data.get("category_id_to_label", {}) or {}
+            fallback_label_to_name: Dict[int, str] = {}
+            if isinstance(raw_category_id_to_label, dict):
+                for cat_id, label in raw_category_id_to_label.items():
+                    try:
+                        label_id = int(label)
+                    except (TypeError, ValueError):
+                        continue
+                    fallback_label_to_name[label_id] = str(cat_id)
+            if fallback_label_to_name:
+                label_to_name = fallback_label_to_name
+                num_classes = len(label_to_name) + 1
+            else:
+                num_classes = _infer_num_classes_from_state_dict(state_dict)
+
+        if num_classes is None:
+            logging.error("Checkpoint missing label mappings and model metadata; cannot infer num_classes.")
+            return
+        if not label_to_name:
+            logging.warning("Label names not found in checkpoint; using numeric labels.")
+
+        model = create_model(
+            num_classes=num_classes,
+            pretrained=False,
+            trainable_backbone_layers=args.trainable_backbone_layers,
+            min_size=args.min_size,
+            max_size=args.max_size,
+        )
+        model.load_state_dict(state_dict)
+        model.to(device)
+
+        deploy_output = Path(args.deploy_output) if args.deploy_output else output_dir / "deploy_predictions"
+        run_deploy_inference(
+            model=model,
+            images_dir=deploy_dir,
+            output_dir=deploy_output,
+            device=device,
+            score_threshold=args.score_threshold,
+            nms_iou_threshold=args.nms_iou_threshold,
+            label_to_name=label_to_name,
+            batch_size=args.batch_size,
+            use_amp=args.amp,
+        )
+        return
 
     dataset_info, train_loader, valid_loader, test_loader = build_dataloaders(args)
     num_classes = len(dataset_info.label_to_name) + 1
@@ -1473,6 +1734,8 @@ def main() -> None:
             max_norm=args.max_grad_norm,
             print_freq=args.print_freq,
         )
+        
+        logging.info("Completed epoch %d training. Computing validation metrics...", epoch)
 
         val_loss = compute_validation_loss(
             model=model,
@@ -1480,6 +1743,8 @@ def main() -> None:
             device=device,
             use_amp=args.amp,
         )
+
+        logging.info("Validation loss for epoch %d: %.4f. Evaluating metrics...", epoch, val_loss)
 
         metrics = evaluate(
             model=model,
