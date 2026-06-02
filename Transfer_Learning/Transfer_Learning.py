@@ -146,6 +146,42 @@ class DatasetInfo:
     category_id_to_label: Dict[int, int]
     label_to_name: Dict[int, str]
 
+class Compose:
+    def __init__(self, transforms: List):
+        self.transforms = transforms
+
+    def __call__(self, image: Image.Image, target: Dict[str, torch.Tensor]):
+        for transform in self.transforms:
+            image, target = transform(image, target)
+        return image, target
+
+
+class ToTensor:
+    def __call__(self, image: Image.Image, target: Dict[str, torch.Tensor]):
+        return F.to_tensor(image), target
+
+
+class RandomHorizontalFlip:
+    def __init__(self, probability: float = 0.5):
+        self.probability = probability
+
+    def __call__(self, image: Image.Image, target: Dict[str, torch.Tensor]):
+        if random.random() < self.probability:
+            image = F.hflip(image)
+            width = image.size[0]
+            boxes = target["boxes"]
+            if boxes.numel() > 0:
+                boxes[:, [0, 2]] = width - boxes[:, [2, 0]]
+                target["boxes"] = boxes
+        return image, target
+
+
+def get_transforms(train: bool, hflip_prob: float) -> Compose:
+    transforms: List = [ToTensor()]
+    if train and hflip_prob > 0:
+        transforms.insert(0, RandomHorizontalFlip(hflip_prob))
+    return Compose(transforms)
+
 
 class CocoDetectionDataset(Dataset):
     def __init__(
