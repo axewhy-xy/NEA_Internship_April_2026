@@ -240,6 +240,54 @@ def create_model(
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
     return model
 
+def move_targets_to_device(targets: List[Dict[str, torch.Tensor]], device: torch.device):
+    moved = []
+    for target in targets:
+        moved.append({key: value.to(device) for key, value in target.items()})
+    return moved
+
+def compute_validation_loss(
+    model: nn.Module,
+    data_loader: DataLoader,
+    device: torch.device,
+    use_amp: bool,
+) -> float:
+    module_training_states = [(module, module.training) for module in model.modules()]
+    model.train()
+
+    eval_only_modules = (
+        nn.modules.batchnorm._BatchNorm,
+        nn.modules.dropout._DropoutNd,
+    )
+
+    def set_eval_for_validation(module: nn.Module) -> None:
+        if isinstance(module, eval_only_modules):
+            module.eval()
+
+    model.apply(set_eval_for_validation)
+    running_loss = 0.0
+    amp_enabled = use_amp and device.type == "cuda"
+
+    try:
+        with torch.no_grad():
+            for images, targets in data_loader:
+                images = [image.to(device) for image in images]
+                targets = move_targets_to_device(targets, device)
+                with torch.cuda.amp.autocast(enabled=amp_enabled):
+                    loss_dict = model(images, targets)
+                    losses = sum(loss for loss in loss_dict.values())
+
+                if not torch.isfinite(losses):
+                    raise ValueError(f"Non-finite loss detected: {losses.item():.6f}")
+
+                running_loss += losses.item()
+    finally:
+        for module, was_training in module_training_states:
+            module.train(was_training)
+
+    return running_loss / max(1, len(data_loader))
+
+
 def train_one_epoch(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
