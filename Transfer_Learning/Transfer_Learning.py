@@ -85,6 +85,88 @@ def get_plotting_backend():
         return None
     return plt
 
+def evaluate(
+    model: nn.Module,
+    data_loader: DataLoader,
+    device: torch.device,
+    score_threshold: float,
+    iou_threshold: float,
+    nms_iou_threshold: float,
+) -> Dict[str, float]:
+    model.eval()
+    tp = fp = fn = 0
+    sum_iou = 0.0
+    match_count = 0
+
+    with torch.no_grad():
+        for images, targets in data_loader:
+            images = [image.to(device) for image in images]
+            outputs = model(images)
+
+            for output, target in zip(outputs, targets):
+                gt_boxes = target["boxes"].cpu()
+                gt_labels = target["labels"].cpu()
+
+                pred_scores = output["scores"].cpu()
+                keep = pred_scores >= score_threshold
+                pred_boxes = output["boxes"].cpu()[keep]
+                pred_labels = output["labels"].cpu()[keep]
+                pred_scores = pred_scores[keep]
+
+                pred_boxes, pred_scores, pred_labels = apply_nms(
+                    pred_boxes,
+                    pred_scores,
+                    pred_labels,
+                    nms_iou_threshold,
+                )
+
+                label_set = set(gt_labels.tolist()) | set(pred_labels.tolist())
+                for label in label_set:
+                    gt_mask = gt_labels == label
+                    pred_mask = pred_labels == label
+                    gt = gt_boxes[gt_mask]
+                    pred = pred_boxes[pred_mask]
+                    pred_score_label = pred_scores[pred_mask]
+
+                    if len(gt) == 0 and len(pred) == 0:
+                        continue
+                    if len(gt) == 0:
+                        fp += len(pred)
+                        continue
+                    if len(pred) == 0:
+                        fn += len(gt)
+                        continue
+
+                    order = torch.argsort(pred_score_label, descending=True)
+                    pred = pred[order]
+                    ious = box_iou(pred, gt)
+                    matched_gt = set()
+
+                    for pred_idx in range(pred.shape[0]):
+                        iou_row = ious[pred_idx]
+                        max_iou, gt_idx = torch.max(iou_row, dim=0)
+                        if max_iou >= iou_threshold and int(gt_idx) not in matched_gt:
+                            tp += 1
+                            matched_gt.add(int(gt_idx))
+                            sum_iou += float(max_iou)
+                            match_count += 1
+                        else:
+                            fp += 1
+
+                    fn += len(gt) - len(matched_gt)
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    mean_iou = sum_iou / match_count if match_count > 0 else 0.0
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "mean_iou": mean_iou,
+    }
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
@@ -95,6 +177,24 @@ def set_seed(seed: int) -> None:
 def collate_fn(batch: Iterable[Tuple[torch.Tensor, Dict[str, torch.Tensor]]]) -> Tuple[List, List]:
     images, targets = zip(*batch)
     return list(images), list(targets)
+
+def load_checkpoint(
+    checkpoint_path: Path,
+    model: nn.Module,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+) -> Dict:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    if "model_state" in checkpoint:
+        model.load_state_dict(checkpoint["model_state"])
+    else:
+        model.load_state_dict(checkpoint)
+
+    if optimizer is not None and "optimizer_state" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
+    if scheduler is not None and checkpoint.get("scheduler_state") is not None:
+        scheduler.load_state_dict(checkpoint["scheduler_state"])
+    return checkpoint
 
 def create_model(
     num_classes: int,
