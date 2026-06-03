@@ -2,7 +2,7 @@
 Transfer Learning for object detection on HDB features using satellite imagery and street view images.
 
 Author: AxeWhy
-Date: 01/06/2026
+Date: 30/05/2026
 Last Updated: 05/06/2026
 
 Description:
