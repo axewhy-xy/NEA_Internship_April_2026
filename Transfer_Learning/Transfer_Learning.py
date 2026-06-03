@@ -20,6 +20,9 @@ Usage CLI:
 To train a model with default settings:
 python Transfer_Learning.py --run-name my_experiment
 
+To train a model with F1-based validation performance with plateau learning rate scheduling and early stopping:
+python Transfer_Learning.py --run-name my_experiment --monitor-metric f1 --lr-scheduler plateau --early-stop-patience 5 --early-stop-min-delta 0.01
+
 To resume training from a checkpoint:
 python Transfer_Learning.py --run-name my_experiment --resume path/to/model_last.pth
 
