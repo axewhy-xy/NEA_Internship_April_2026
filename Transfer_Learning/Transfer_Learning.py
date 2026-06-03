@@ -823,6 +823,122 @@ def evaluate(
 
 """
 # ----------------------------------------------------------------------------------------------------
+# resolve_monitor_mode()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper resolves whether lower or higher values are better for the selected validation monitor metric.
+
+Args:
+- monitor_metric (str): Validation metric being monitored.
+- monitor_mode (str): Requested mode, either "auto", "min", or "max".
+
+Returns:
+- str: "min" when lower values are better, otherwise "max".
+"""
+def resolve_monitor_mode(monitor_metric: str, monitor_mode: str) -> str:
+    if monitor_mode != "auto":
+        return monitor_mode
+    return "min" if monitor_metric == "val_loss" else "max"
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# get_monitor_value()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper retrieves the validation value used for checkpointing, plateau scheduling, and early stopping.
+
+Args:
+- monitor_metric (str): Validation metric to retrieve.
+- val_loss (float): Validation loss for the current epoch.
+- metrics (Dict[str, float]): Validation detection metrics for the current epoch.
+
+Returns:
+- float: The selected validation monitor value.
+"""
+def get_monitor_value(
+    monitor_metric: str,
+    val_loss: float,
+    metrics: Dict[str, float],
+) -> float:
+    if monitor_metric == "val_loss":
+        return float(val_loss)
+    return float(metrics[monitor_metric])
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# has_monitor_improved()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper compares a current validation monitor value against the previous best value.
+
+Args:
+- current_value (float): Current epoch monitor value.
+- best_value (float): Best monitor value seen so far.
+- monitor_mode (str): "min" when lower is better, "max" when higher is better.
+- min_delta (float): Minimum improvement required.
+
+Returns:
+- bool: True if the monitor improved by at least min_delta.
+"""
+def has_monitor_improved(
+    current_value: float,
+    best_value: float,
+    monitor_mode: str,
+    min_delta: float,
+) -> bool:
+    if monitor_mode == "min":
+        return current_value < (best_value - min_delta)
+    return current_value > (best_value + min_delta)
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# initial_best_monitor_value()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper returns the starting best value for a validation monitor.
+
+Args:
+- monitor_mode (str): "min" when lower is better, "max" when higher is better.
+
+Returns:
+- float: Positive infinity for min mode, negative infinity for max mode.
+"""
+def initial_best_monitor_value(monitor_mode: str) -> float:
+    return float("inf") if monitor_mode == "min" else float("-inf")
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# best_monitor_from_checkpoint()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper restores the best monitored validation value from both current and older checkpoint formats.
+
+Args:
+- checkpoint (Dict): Loaded checkpoint dictionary.
+- monitor_metric (str): Currently selected validation monitor metric.
+- monitor_mode (str): Currently selected monitor mode.
+
+Returns:
+- float: Restored best monitor value, or a mode-appropriate initial value if unavailable.
+"""
+def best_monitor_from_checkpoint(
+    checkpoint: Dict,
+    monitor_metric: str,
+    monitor_mode: str,
+) -> float:
+    checkpoint_metric = checkpoint.get("best_monitor_metric")
+    if checkpoint_metric == monitor_metric and "best_monitor_value" in checkpoint:
+        return float(checkpoint["best_monitor_value"])
+
+    if monitor_metric == "val_loss" and "best_val_loss" in checkpoint:
+        return float(checkpoint["best_val_loss"])
+    if monitor_metric == "f1":
+        return float(checkpoint.get("best_f1", checkpoint.get("best_metric", 0.0)))
+
+    return initial_best_monitor_value(monitor_mode)
+
+"""
+# ----------------------------------------------------------------------------------------------------
 # get_plotting_backend()
 # ----------------------------------------------------------------------------------------------------
 Description:
@@ -1254,20 +1370,26 @@ def run_deploy_inference(
 # ----------------------------------------------------------------------------------------------------
 Description:
 This function saves the training checkpoint for the model, including the model state, optimizer state,
-scheduler state, current epoch, best metric value, and dataset information. The checkpoint is saved to
-the specified output directory, with a filename indicating whether it is the last checkpoint or the best
-checkpoint based on the metric. The function creates the output directory if it does not exist, and saves
-the checkpoint using PyTorch's torch.save() function. The checkpoint includes all necessary information to
-resume training or to evaluate the model later.
+scheduler state, current epoch, best monitored validation value, best validation loss, best F1 score,
+early-stopping state, and dataset information. The checkpoint is saved to the specified output directory,
+with a filename indicating whether it is the last checkpoint or the best checkpoint based on the selected
+monitor metric. The function creates the output directory if it does not exist, and saves the checkpoint
+using PyTorch's torch.save() function. The checkpoint includes all necessary information to resume training
+or to evaluate the model later.
 
 Args:
 - output_dir (Path): The directory where the checkpoint should be saved.
 - model (nn.Module): The model whose state is to be saved.
 - optimizer (torch.optim.Optimizer): The optimizer whose state is to be saved.
-- scheduler (Optional[torch.optim.lr_scheduler._LRScheduler]): The learning rate scheduler whose state 
+- scheduler (Optional): The learning rate scheduler whose state
     is to be saved, if applicable.
 - epoch (int): The current epoch number to be saved in the checkpoint.
-- best_metric (float): The best metric value achieved so far, to be saved in the checkpoint.
+- best_monitor_value (float): The best value achieved so far for the selected validation monitor metric.
+- monitor_metric (str): The validation metric used for best-checkpoint and early-stopping decisions.
+- monitor_mode (str): Whether lower ("min") or higher ("max") monitor values are better.
+- best_val_loss (float): The best validation loss achieved so far.
+- best_f1 (float): The best F1 score achieved so far.
+- epochs_without_improve (int): Number of consecutive epochs without enough monitor improvement.
 - dataset_info (DatasetInfo): The dataset information containing category and label mappings to
      be saved in the checkpoint.
 - is_best (bool): A flag indicating whether this checkpoint is the best one based on the metric,
@@ -1281,9 +1403,14 @@ def save_checkpoint(
     output_dir: Path,
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
-    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler],
+    scheduler,
     epoch: int,
-    best_metric: float,
+    best_monitor_value: float,
+    monitor_metric: str,
+    monitor_mode: str,
+    best_val_loss: float,
+    best_f1: float,
+    epochs_without_improve: int,
     dataset_info: DatasetInfo,
     is_best: bool,
 ) -> None:
@@ -1293,7 +1420,13 @@ def save_checkpoint(
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "scheduler_state": scheduler.state_dict() if scheduler is not None else None,
-        "best_metric": best_metric,
+        "best_metric": best_monitor_value,
+        "best_monitor_value": best_monitor_value,
+        "best_monitor_metric": monitor_metric,
+        "best_monitor_mode": monitor_mode,
+        "best_f1": best_f1,
+        "best_val_loss": best_val_loss,
+        "epochs_without_improve": epochs_without_improve,
         "category_id_to_label": dataset_info.category_id_to_label,
         "label_to_name": dataset_info.label_to_name,
     }
@@ -1319,7 +1452,7 @@ Args:
 - model (nn.Module): The model into which the state should be loaded.
 - optimizer (Optional[torch.optim.Optimizer]): The optimizer into which the state should be loaded,
      if applicable.
-- scheduler (Optional[torch.optim.lr_scheduler._LRScheduler]): The learning rate scheduler into which
+- scheduler (Optional): The learning rate scheduler into which
      the state should be loaded, if applicable.
 
 Returns:
@@ -1330,7 +1463,7 @@ def load_checkpoint(
     checkpoint_path: Path,
     model: nn.Module,
     optimizer: Optional[torch.optim.Optimizer] = None,
-    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+    scheduler = None,
 ) -> Dict:
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     if "model_state" in checkpoint:
@@ -1341,7 +1474,10 @@ def load_checkpoint(
     if optimizer is not None and "optimizer_state" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
     if scheduler is not None and checkpoint.get("scheduler_state") is not None:
-        scheduler.load_state_dict(checkpoint["scheduler_state"])
+        try:
+            scheduler.load_state_dict(checkpoint["scheduler_state"])
+        except (KeyError, TypeError, ValueError) as exc:
+            logging.warning("Skipping scheduler state from checkpoint because it is incompatible: %s", exc)
     return checkpoint
 
 """
@@ -1560,7 +1696,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.0005, help="Weight decay for the optimizer.")
     parser.add_argument("--lr-step-size", type=int, default=3, help="Step size for the learning rate scheduler.")
     parser.add_argument("--lr-gamma", type=float, default=0.5, help="Gamma for the learning rate scheduler.")
+    parser.add_argument(
+        "--lr-scheduler",
+        type=str,
+        default="step",
+        choices=["step", "plateau", "cosine", "none"],
+        help="Learning rate scheduler type.",
+    )
+    parser.add_argument("--plateau-patience", type=int, default=3, help="Patience for ReduceLROnPlateau.")
+    parser.add_argument("--plateau-factor", type=float, default=0.5, help="Factor for ReduceLROnPlateau.")
+    parser.add_argument("--plateau-min-lr", type=float, default=1e-6, help="Minimum LR for ReduceLROnPlateau.")
+    parser.add_argument("--cosine-t-max", type=int, default=0, help="T_max for CosineAnnealingLR (0 uses epochs).")
+    parser.add_argument("--cosine-min-lr", type=float, default=0.0, help="Minimum LR for CosineAnnealingLR.")
     parser.add_argument("--max-grad-norm", type=float, default=10.0, help="Maximum norm for gradient clipping.")
+    parser.add_argument(
+        "--monitor-metric",
+        type=str,
+        default="val_loss",
+        choices=["val_loss", "precision", "recall", "f1", "mean_iou"],
+        help="Validation metric used for best checkpoint, ReduceLROnPlateau, and early stopping.",
+    )
+    parser.add_argument(
+        "--monitor-mode",
+        type=str,
+        default="auto",
+        choices=["auto", "min", "max"],
+        help="Whether lower or higher monitor values are better (auto uses min for val_loss, max otherwise).",
+    )
 
     parser.add_argument("--trainable-backbone-layers", type=int, default=3, help="Number of trainable backbone layers.")
     parser.add_argument("--min-size", type=int, default=None, help="Minimum image size.")
@@ -1578,6 +1740,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--print-freq", type=int, default=20, help="Frequency of printing training progress.")
     parser.add_argument("--limit", type=int, default=0, help="Limit the number of samples for debugging.")
     parser.add_argument("--skip-missing", action="store_true", help="Skip missing images during training.")
+    parser.add_argument("--early-stop-patience", type=int, default=0, help="Stop training if the monitored validation metric does not improve for this many epochs (0 disables).")
+    parser.add_argument("--early-stop-min-delta", type=float, default=0.0, help="Minimum monitored-metric improvement required to reset early stopping patience.")
 
     parser.add_argument("--resume", type=str, default="", help="Path to checkpoint to resume training from.")
     parser.add_argument("--test-only", action="store_true", help="Run evaluation on the test dataset only.")
@@ -1586,7 +1750,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test-deploy", type=str, default="", help="Directory of unlabeled images for deployment inference. If set, training and test evaluation are skipped.")
     parser.add_argument("--deploy-output", type=str, default="", help="Output directory for deployment predictions (default: <output_root>/<run_name>/deploy_predictions).")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.early_stop_patience < 0:
+        parser.error("--early-stop-patience must be >= 0")
+    if args.early_stop_min_delta < 0:
+        parser.error("--early-stop-min-delta must be >= 0")
+    if args.lr_step_size <= 0:
+        parser.error("--lr-step-size must be > 0")
+    if args.plateau_factor <= 0 or args.plateau_factor >= 1:
+        parser.error("--plateau-factor must be greater than 0 and less than 1")
+
+    return args
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -1732,12 +1906,41 @@ def main() -> None:
         momentum=args.momentum,
         weight_decay=args.weight_decay,
     )
-    scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer, step_size=args.lr_step_size, gamma=args.lr_gamma
+    monitor_mode = resolve_monitor_mode(args.monitor_metric, args.monitor_mode)
+    logging.info(
+        "Monitoring validation %s for best checkpoint, plateau scheduling, and early stopping (%s is better).",
+        args.monitor_metric,
+        "lower" if monitor_mode == "min" else "higher",
     )
 
+    scheduler = None
+    if args.lr_scheduler == "step":
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=args.lr_step_size, gamma=args.lr_gamma
+        )
+    elif args.lr_scheduler == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode=monitor_mode,
+            factor=args.plateau_factor,
+            patience=args.plateau_patience,
+            min_lr=args.plateau_min_lr,
+        )
+    elif args.lr_scheduler == "cosine":
+        t_max = args.cosine_t_max if args.cosine_t_max > 0 else args.epochs
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, t_max),
+            eta_min=args.cosine_min_lr,
+        )
+    else:
+        scheduler = None
+
     scaler = torch.cuda.amp.GradScaler(enabled=args.amp and device.type == "cuda")
-    best_metric = 0.0
+    best_f1 = 0.0
+    best_val_loss = float("inf")
+    best_monitor_value = initial_best_monitor_value(monitor_mode)
+    epochs_without_improve = 0
     start_epoch = 1
     history = {
         "train_loss": [],
@@ -1756,7 +1959,14 @@ def main() -> None:
             logging.warning("--resume flag is set without --test-only; Please ensure the optimizer param group keys match the checkpoint (e.g., same --trainable-backbone-layers, --min-size, --max-size, and pretrained settings as the original run).")
             checkpoint = load_checkpoint(Path(args.resume), model, optimizer, scheduler)
             start_epoch = checkpoint.get("epoch", 0) + 1
-            best_metric = checkpoint.get("best_metric", 0.0)
+            best_f1 = checkpoint.get("best_f1", checkpoint.get("best_metric", 0.0))
+            best_val_loss = checkpoint.get("best_val_loss", float("inf"))
+            best_monitor_value = best_monitor_from_checkpoint(
+                checkpoint,
+                args.monitor_metric,
+                monitor_mode,
+            )
+            epochs_without_improve = int(checkpoint.get("epochs_without_improve", 0))
             logging.info("Resumed from %s (epoch %d)", args.resume, start_epoch - 1)
 
     if args.test_only:
@@ -1821,11 +2031,16 @@ def main() -> None:
             iou_threshold=args.iou_threshold,
             nms_iou_threshold=args.nms_iou_threshold,
         )
+        monitor_value = get_monitor_value(args.monitor_metric, val_loss, metrics)
 
-        scheduler.step()
+        if scheduler is not None:
+            if args.lr_scheduler == "plateau":
+                scheduler.step(monitor_value)
+            else:
+                scheduler.step()
 
         logging.info(
-            "Epoch %d | Train loss %.4f | Val loss %.4f | Val precision %.4f | Val recall %.4f | Val F1 %.4f | Val mIoU %.4f",
+            "Epoch %d | Train loss %.4f | Val loss %.4f | Val precision %.4f | Val recall %.4f | Val F1 %.4f | Val mIoU %.4f | Monitor %s %.4f | LR %s",
             epoch,
             train_loss,
             val_loss,
@@ -1833,6 +2048,9 @@ def main() -> None:
             metrics["recall"],
             metrics["f1"],
             metrics["mean_iou"],
+            args.monitor_metric,
+            monitor_value,
+            ", ".join(f"{group['lr']:.6g}" for group in optimizer.param_groups),
         )
 
         history["train_loss"].append(train_loss)
@@ -1845,16 +2063,35 @@ def main() -> None:
         if plot_backend is not None:
             save_training_plots(history, graphical_dir, plot_backend)
 
-        is_best = metrics["f1"] > best_metric
+        is_best = has_monitor_improved(monitor_value, best_monitor_value, monitor_mode, 0.0)
+        resets_patience = has_monitor_improved(
+            monitor_value,
+            best_monitor_value,
+            monitor_mode,
+            args.early_stop_min_delta,
+        )
         if is_best:
-            best_metric = metrics["f1"]
+            best_monitor_value = monitor_value
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+        if resets_patience:
+            epochs_without_improve = 0
+        else:
+            epochs_without_improve += 1
+        if metrics["f1"] > best_f1:
+            best_f1 = metrics["f1"]
         save_checkpoint(
             output_dir=output_dir,
             model=model,
             optimizer=optimizer,
             scheduler=scheduler,
             epoch=epoch,
-            best_metric=best_metric,
+            best_monitor_value=best_monitor_value,
+            monitor_metric=args.monitor_metric,
+            monitor_mode=monitor_mode,
+            best_val_loss=best_val_loss,
+            best_f1=best_f1,
+            epochs_without_improve=epochs_without_improve,
             dataset_info=dataset_info,
             is_best=is_best,
         )
@@ -1863,7 +2100,23 @@ def main() -> None:
             extra_path = output_dir / f"model_epoch_{epoch}.pth"
             torch.save(model.state_dict(), extra_path)
 
-    logging.info("Training complete. Best F1: %.4f", best_metric)
+        if args.early_stop_patience > 0 and epochs_without_improve >= args.early_stop_patience:
+            logging.info(
+                "Early stopping triggered at epoch %d (no %s improvement >= %.6g for %d epochs).",
+                epoch,
+                args.monitor_metric,
+                args.early_stop_min_delta,
+                epochs_without_improve,
+            )
+            break
+
+    logging.info(
+        "Training complete. Best %s: %.4f | Best F1: %.4f | Best val loss: %.4f",
+        args.monitor_metric,
+        best_monitor_value,
+        best_f1,
+        best_val_loss,
+    )
 
     if args.skip_test:
         logging.info("Skipping test evaluation as per --skip-test flag.")
