@@ -830,6 +830,8 @@ def evaluate(
 # ----------------------------------------------------------------------------------------------------
 Description:
 This helper resolves whether lower or higher values are better for the selected validation monitor metric.
+If the monitor mode is set to "auto", it assumes that "val_loss" should be minimized and all other metrics
+should be maximized.
 
 Args:
 - monitor_metric (str): Validation metric being monitored.
@@ -849,6 +851,10 @@ def resolve_monitor_mode(monitor_metric: str, monitor_mode: str) -> str:
 # ----------------------------------------------------------------------------------------------------
 Description:
 This helper retrieves the validation value used for checkpointing, plateau scheduling, and early stopping.
+It supports both the validation loss and any of the computed validation metrics. The function checks the
+selected monitor metric and returns the corresponding value from either the validation loss or the metrics
+dictionary. This allows for flexible monitoring based on the user's choice of metric for evaluating model
+performance during training.
 
 Args:
 - monitor_metric (str): Validation metric to retrieve.
@@ -872,7 +878,11 @@ def get_monitor_value(
 # has_monitor_improved()
 # ----------------------------------------------------------------------------------------------------
 Description:
-This helper compares a current validation monitor value against the previous best value.
+This helper compares a current validation monitor value against the previous best value. It determines
+whether the monitor has improved based on the selected monitor mode ("min" for metrics where lower is
+better, "max" for metrics where higher is better) and a minimum improvement threshold (min_delta). This
+allows for more robust checkpointing and early stopping by ensuring that only significant improvements
+are considered as true improvements, rather than minor fluctuations in the monitored metric.
 
 Args:
 - current_value (float): Current epoch monitor value.
@@ -898,7 +908,12 @@ def has_monitor_improved(
 # initial_best_monitor_value()
 # ----------------------------------------------------------------------------------------------------
 Description:
-This helper returns the starting best value for a validation monitor.
+This helper returns the starting best value for a validation monitor. For "min" mode, it returns positive
+infinity so that any real monitor value will be considered an improvement. For "max" mode, it returns
+negative infinity so that any real monitor value will be considered an improvement. This provides a
+sensible initial value for tracking the best monitor value during training, ensuring that the first 
+epoch's monitor value will always be treated as an improvement and properly initialize the best value for
+subsequent comparisons.
 
 Args:
 - monitor_mode (str): "min" when lower is better, "max" when higher is better.
@@ -915,6 +930,13 @@ def initial_best_monitor_value(monitor_mode: str) -> float:
 # ----------------------------------------------------------------------------------------------------
 Description:
 This helper restores the best monitored validation value from both current and older checkpoint formats.
+It checks for the presence of the "best_monitor_metric" and "best_monitor_value" keys in the checkpoint
+to restore the best value for the currently selected monitor metric. If those keys are not present, it
+falls back to checking for older keys like "best_val_loss" for the "val_loss" metric. If the relevant
+keys are not found in the checkpoint, it returns a mode-appropriate initial value using the 
+initial_best_monitor_value() function. This ensures that the best monitor value is correctly initialized
+when resuming training from a checkpoint, even if the checkpoint format has changed or does not contain
+the expected keys for the current monitor metric.
 
 Args:
 - checkpoint (Dict): Loaded checkpoint dictionary.
@@ -1489,7 +1511,13 @@ def load_checkpoint(
 # ----------------------------------------------------------------------------------------------------
 Description:
 This helper function attempts to infer the number of classes from a Faster R-CNN state dict by
-inspecting the classifier layer dimensions.
+inspecting the classifier layer dimensions. It checks for the presence of the
+"roi_heads.box_predictor.cls_score.weight" and "roi_heads.box_predictor.cls_score.bias" keys in 
+the state dictionary, which correspond to the weights and biases of the classification layer in the ROI
+heads of the Faster R-CNN model. If either of these keys is found and has a valid shape, the function
+returns the number of classes inferred from the shape of the weights or biases. If neither key is found
+or if they do not have valid shapes, the function returns None, indicating that the number of classes
+could not be inferred from the state dictionary.
 
 Args:
 - state_dict (Dict[str, torch.Tensor]): Model state dict.
