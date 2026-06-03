@@ -36,6 +36,7 @@ The outcome of the project would be a labelled dataset with structural and archi
 14. Implemented a visualization function in the training script to display the bounding box results on the test images.
 15. Implemented Non-Maximum Suppression (NMS) in the training script to filter out overlapping bounding boxes and retain only the most relevant ones, which would help to improve the precision of the model's predictions and enhance its overall performance in detecting and localizing the relevant features in the images.
 16. Implemented a plotting function in the training script that can visualize the training loss and evaluation metrics over epochs, allowing for monitoring the training process and assessing how well the model is learning from the data.
+17. Implemented functionality in the training script for testing the trained model on unseen/non-labelled data, allowing for assessing the model's performance on a deployment-like scenario where it would encounter new data that it has not seen during training.
 
 ## Deprecated Tasks:
 ### 1.  Write an algorithm/script to extract the relevant features from the retrieved images using image processing techniques such as edge detection, corner detection, etc.
@@ -87,8 +88,11 @@ While testing the training script, it was found that there was no implementation
 ### 15. Training script unable to plot graphical results: (2026-06-04) [Low] [Resolved]
 While testing the training script, it was found that the script was unable to plot graphical results such as training loss and evaluation metrics over epochs. This is an important aspect of model development as it allows for monitoring the training process and assessing how well the model is learning from the data. By implementing a plotting function in the training script that can visualize the training loss and evaluation metrics over epochs, it became possible to track the model's performance during training and make informed decisions about adjustments to the training process to improve the model's performance.
 
-### 16. Training script unable to test model on unseen/non-labelled data: (2026-06-05) [Low] [Unresolved]
+### 16. Training script unable to test model on unseen/non-labelled data: (2026-06-05) [Low] [Resolved]
 While testing the training script, it was discovered that the script was unable to test the trained model on unseen/non-labelled data. The script only runs on the test dataset which is a subset of the labelled dataset, and there is no functionality implemented to allow for testing the model on completely unseen data that was not part of the labelled dataset. This is an important aspect of the model evaluation process, as it allows for assessing the model's performance on a deployment-like scenario where it would encounter new data that it has not seen during training.
+
+### 17. Training script unable to stop training early based on evaluation metrics: (2026-06-05) [Low] [Unresolved]
+The current training source code does not have the functionality for early stopping based on evaluation metrics. This means that the training process will continue for the specified number of epochs regardless of the model's performance. In other words, there is no safe mechanism to prevent overfitting the model if the model's performance starts to "memorize" the training data and performs poorly on the validation set. By implementing early stopping functionality in the training script, it would be possible to monitor the evaluation metrics during training and stop the training process early if the model's performance starts to degrade on the validation set, which would help to prevent overfitting and improve the generalization performance of the model.
 
 ## Mitigation/Solution:
 ### 1. Low satellite imagery resolution: (2026-04-13)
@@ -139,6 +143,9 @@ To mitigate this issue, there is a need to implement a plotting function in the 
 ### 16. Training script unable to test model on unseen/non-labelled data: (2026-06-05)
 To mitigate this issue, there is a need to implement functionality in the training script for testing the trained model on unseen/non-labelled data. This would involve loading the best model and running a new, unlabelled dataset through it to get predictions. By implementing this solution, it will be possible to assess the model's performance on a deployment-like scenario where it would encounter new data that it has not seen during training, which is an important aspect of model evaluation. One possible approach to implementing this functionality could be to create a separate function in the training script that takes in a new dataset/images, loads the best model, and runs the new, unlabelled dataset through the model to get predictions. This would allow for testing the model on unseen data and evaluating its performance in a more realistic scenario.
 
+### 17. Training script unable to stop training early based on evaluation metrics: (2026-06-05)
+While there isn't a need for early stopping functionality, it would be a useful feature to have in the training script to prevent overfitting since with this feature, the training script will be able to monitor and save the best model based on the evaluation metrics during training. Hence reducing the need to manually monitor the training process and stop it at the right time to prevent overfitting. By implementing early stopping functionality in the training script, it would be possible to ensure that the model does not overfit the training data and can generalize well to unseen data, ultimately improving its performance and reliability in real-world applications.
+
 ## Problem Resolution:
 ### 1. Low satellite imagery resolution:
 Retrieved images by using Google Map Tile API instead. The image was retrieved using the satellite tile by calling the Google Map Tile API, which provided a much clearer image of the HDB roofings, allowing for better labelling of the dataset.
@@ -184,3 +191,6 @@ To resolve the issue of missing Non-Maximum Suppression (NMS) in the training sc
 
 ### 15. Training script unable to plot graphical results:
 To resolve the issue of the training script being unable to plot graphical results, a plotting function was implemented in the training script that can visualize the training loss and evaluation metrics over epochs using matplotlib. This allowed for tracking the model's performance during training and making informed decisions about adjustments to the training process to improve the model's performance. By implementing this solution, it became possible to monitor the training process and assess how well the model is learning from the data, which is an important aspect of model development and ultimately contributed to the success of the project.
+
+### 16. Training script unable to test model on unseen/non-labelled data:
+A functionality was implemented in the training script for testing the trained model on unseen/non-labelled data. This involved creating a separate function that takes in a new dataset/images, loads the best model, and runs the new, unlabelled dataset through the model to get predictions. By implementing this solution, it became possible to assess the model's performance on a deployment-like scenario where it would encounter new data that it has not seen during training, which is an important aspect of model evaluation. This functionality allows for testing the model's generalization performance and provides insights into how well the model can perform on unseen data, ultimately contributing to the success of the project.
