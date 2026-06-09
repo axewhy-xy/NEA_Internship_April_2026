@@ -35,6 +35,15 @@ logs
 *.svg
 *.ico
 
+#Image files whitelist
+!Labelled_Dataset/*.png
+!Labelled_Dataset/*.jpg
+!Labelled_Dataset/*.jpeg
+!Labelled_Dataset/*.gif
+!Labelled_Dataset/*.bmp
+!Labelled_Dataset/*.svg
+!Labelled_Dataset/*.ico
+
 #Model checkpoints
 *.pth
 *.ckpt
