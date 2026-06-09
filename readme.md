@@ -15,9 +15,12 @@ The outcome of the project would be a labelled dataset with structural and archi
 8. [X] - Write an algorithm/script to augment the dataset using techniques such as rotation, flipping, scaling, etc. to increase the diversity of the dataset and improve the performance of the model.
 9. [X] - Scrutinise the augmented dataset and discard any images that are too distorted or do not accurately represent the features of the HDB buildings that are relevant to mosquito activity.
 10. [X] - Label the dataset with the relevant features for training a pre-trained model.
-11. [ ] - Download and set up the pre-trained model locally (e.g., ResNet-50) for feature extraction.
+11. [X] - Download and set up the pre-trained model locally (e.g., ResNet-50) for feature extraction.
 12. [ ] - Train the pre-trained model on the labelled dataset to extract the relevant features from the images.
-13. [ ] - Evaluate the performance of the model and analyze which data augmentation techniques are most effective for improving the model's performance without compromising the integrity of the features being extracted.
+13. [ ] - Evaluate the performance of the trained model on a validation set and make adjustments as necessary to improve its performance.
+14. [ ] - Test the trained model on a test set to assess its performance on unseen data and ensure that it can generalize well to new images of HDB buildings.
+15. [ ] - Document the entire process, including the algorithms/scripts used for data retrieval, augmentation, labelling, and model training, as well as the results and insights gained from the project.
+16. [ ] - Prepare a final report to present the findings of the project, including the performance of the trained model and its potential applications for optimizing Wolbachia-Aedes releases in HDB residential buildings.
 
 ## Completed Tasks:
 1. Set up environment for Google Earth Engine API for satellite imagery
