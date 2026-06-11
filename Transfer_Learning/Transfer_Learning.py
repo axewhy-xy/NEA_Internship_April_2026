@@ -2031,6 +2031,8 @@ def main() -> None:
     if plot_backend is None:
         logging.warning("matplotlib not available; skipping graphical results.")
 
+    logging.info("Training started for %d epochs...", args.epochs)
+
     for epoch in range(start_epoch, args.epochs + 1):
         train_loss = train_one_epoch(
             model=model,
