@@ -3,7 +3,7 @@ Transfer Learning for object detection on HDB features using satellite imagery a
 
 Author: AxeWhy
 Date: 30/05/2026
-Last Updated: 08/06/2026
+Last Updated: 16/06/2026
 
 Description:
 This script implements transfer learning for object detection on HDB features using satellite imagery
@@ -1888,9 +1888,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs.")
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size for training and validation.")
     parser.add_argument("--num-workers", type=int, default=0 if os.name == "nt" else 4, help="Number of worker processes for data loading.")
-    parser.add_argument("--learning-rate", type=float, default=0.005, help="Learning rate for the optimizer.")
+    parser.add_argument("--learning-rate", type=float, default=0.001, help="Learning rate for the optimizer.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for the optimizer.")
-    parser.add_argument("--weight-decay", type=float, default=0.0005, help="Weight decay for the optimizer.")
+    parser.add_argument("--weight-decay", type=float, default=0.0001, help="Weight decay for the optimizer.")
     parser.add_argument("--lr-step-size", type=int, default=3, help="Step size for the learning rate scheduler.")
     parser.add_argument("--lr-gamma", type=float, default=0.5, help="Gamma for the learning rate scheduler.")
     parser.add_argument(
@@ -1905,7 +1905,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--plateau-min-lr", type=float, default=1e-6, help="Minimum LR for ReduceLROnPlateau.")
     parser.add_argument("--cosine-t-max", type=int, default=0, help="T_max for CosineAnnealingLR (0 uses epochs).")
     parser.add_argument("--cosine-min-lr", type=float, default=0.0, help="Minimum LR for CosineAnnealingLR.")
-    parser.add_argument("--max-grad-norm", type=float, default=10.0, help="Maximum norm for gradient clipping.")
+    parser.add_argument("--max-grad-norm", type=float, default=1.0, help="Maximum norm for gradient clipping.")
     parser.add_argument(
         "--monitor-metric",
         type=str,
