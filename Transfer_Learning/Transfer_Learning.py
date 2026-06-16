@@ -55,6 +55,7 @@ import json
 import logging
 import os
 import random
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -962,6 +963,166 @@ def best_monitor_from_checkpoint(
 
     return initial_best_monitor_value(monitor_mode)
 
+TRAINING_HISTORY_KEYS = ("train_loss", "val_loss", "precision", "recall", "f1", "mean_iou")
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# create_training_history()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper creates the in-memory structure used for training plots. The explicit epoch axis allows
+plots to continue with the true epoch numbers after resuming from a checkpoint.
+
+Args:
+- None
+
+Returns:
+- Dict[str, List[float]]: Empty plotting history with epoch and metric lists.
+"""
+def create_training_history() -> Dict[str, List[float]]:
+    history = {"epochs": []}
+    for key in TRAINING_HISTORY_KEYS:
+        history[key] = []
+    return history
+
+def copy_training_history(history: Dict[str, List[float]]) -> Dict[str, List[float]]:
+    return {key: list(values) for key, values in history.items()}
+
+def normalize_training_history(
+    raw_history,
+    max_epoch: Optional[int] = None,
+) -> Dict[str, List[float]]:
+    history = create_training_history()
+    if not isinstance(raw_history, dict):
+        return history
+
+    for key in ("epochs", *TRAINING_HISTORY_KEYS):
+        values = raw_history.get(key, [])
+        if not isinstance(values, list):
+            continue
+
+        normalized_values = []
+        for value in values:
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                continue
+            normalized_values.append(int(numeric_value) if key == "epochs" else numeric_value)
+        history[key] = normalized_values
+
+    value_count = max((len(history[key]) for key in TRAINING_HISTORY_KEYS), default=0)
+    if value_count and len(history["epochs"]) != value_count:
+        history["epochs"] = list(range(1, value_count + 1))
+
+    if max_epoch is not None and history["epochs"]:
+        keep_indices = [
+            index for index, epoch in enumerate(history["epochs"])
+            if int(epoch) <= max_epoch
+        ]
+        history["epochs"] = [history["epochs"][index] for index in keep_indices]
+        for key in TRAINING_HISTORY_KEYS:
+            values = history.get(key, [])
+            history[key] = [values[index] for index in keep_indices if index < len(values)]
+
+    return history
+
+def append_training_history(
+    history: Dict[str, List[float]],
+    epoch: int,
+    train_loss: float,
+    val_loss: float,
+    metrics: Dict[str, float],
+) -> None:
+    epoch = int(epoch)
+    history.setdefault("epochs", [])
+    for key in TRAINING_HISTORY_KEYS:
+        history.setdefault(key, [])
+
+    cutoff = len(history["epochs"])
+    for index, existing_epoch in enumerate(history["epochs"]):
+        if int(existing_epoch) >= epoch:
+            cutoff = index
+            break
+
+    if cutoff < len(history["epochs"]):
+        history["epochs"] = history["epochs"][:cutoff]
+        for key in TRAINING_HISTORY_KEYS:
+            history[key] = history[key][:cutoff]
+
+    history["epochs"].append(epoch)
+    history["train_loss"].append(float(train_loss))
+    history["val_loss"].append(float(val_loss))
+    history["precision"].append(float(metrics["precision"]))
+    history["recall"].append(float(metrics["recall"]))
+    history["f1"].append(float(metrics["f1"]))
+    history["mean_iou"].append(float(metrics["mean_iou"]))
+
+def load_training_history_from_log(
+    log_path: Path,
+    max_epoch: Optional[int] = None,
+) -> Dict[str, List[float]]:
+    history = create_training_history()
+    if not log_path.exists():
+        return history
+
+    metric_pattern = re.compile(
+        r"Epoch\s+(?P<epoch>\d+)\s+\|\s+"
+        r"Train loss\s+(?P<train_loss>[-+0-9.eE]+)\s+\|\s+"
+        r"Val loss\s+(?P<val_loss>[-+0-9.eE]+)\s+\|\s+"
+        r"Val precision\s+(?P<precision>[-+0-9.eE]+)\s+\|\s+"
+        r"Val recall\s+(?P<recall>[-+0-9.eE]+)\s+\|\s+"
+        r"Val F1\s+(?P<f1>[-+0-9.eE]+)\s+\|\s+"
+        r"Val mIoU\s+(?P<mean_iou>[-+0-9.eE]+)"
+    )
+    metrics_by_epoch: Dict[int, Dict[str, float]] = {}
+    try:
+        with log_path.open("r", encoding="utf-8") as file:
+            for line in file:
+                match = metric_pattern.search(line)
+                if match is None:
+                    continue
+                epoch = int(match.group("epoch"))
+                if max_epoch is not None and epoch > max_epoch:
+                    continue
+                metrics_by_epoch[epoch] = {
+                    key: float(match.group(key))
+                    for key in TRAINING_HISTORY_KEYS
+                }
+    except OSError as exc:
+        logging.warning("Could not read plotting history from %s: %s", log_path, exc)
+        return history
+
+    for epoch in sorted(metrics_by_epoch):
+        history["epochs"].append(epoch)
+        for key in TRAINING_HISTORY_KEYS:
+            history[key].append(metrics_by_epoch[epoch][key])
+
+    return history
+
+def restore_training_history(
+    checkpoint: Dict,
+    resume_path: Path,
+    output_dir: Path,
+    max_epoch: int,
+) -> Tuple[Dict[str, List[float]], str]:
+    raw_history = checkpoint.get("training_history", checkpoint.get("history"))
+    history = normalize_training_history(raw_history, max_epoch=max_epoch)
+    if history["train_loss"]:
+        return history, "checkpoint"
+
+    seen_log_paths = set()
+    for log_path in (resume_path.parent / "train.log", output_dir / "train.log"):
+        resolved_log_path = str(log_path.resolve())
+        if resolved_log_path in seen_log_paths:
+            continue
+        seen_log_paths.add(resolved_log_path)
+
+        history = load_training_history_from_log(log_path, max_epoch=max_epoch)
+        if history["train_loss"]:
+            return history, str(log_path)
+
+    return create_training_history(), ""
+
 """
 # ----------------------------------------------------------------------------------------------------
 # get_plotting_backend()
@@ -991,8 +1152,8 @@ def get_plotting_backend():
 # ----------------------------------------------------------------------------------------------------
 Description:
 This function generates and saves training and validation loss curves, as well as validation metrics
-curves, based on the provided training history. It takes a history dictionary containing list of loss
-and metric values for each epoch, an output directory to save the plots, and the Matplotlib pyplot module.
+curves, based on the provided training history. It takes a history dictionary containing list of epoch,
+loss, and metric values, an output directory to save the plots, and the Matplotlib pyplot module.
 The function checks if the necessary data is available in the history and generates the corresponding plots.
 The loss curve plot shows the training and validation loss over epochs, while the metrics curve plot shows
 the precision, recall, F1 score, and mean IoU over epochs. The generated plots are saved as PNG files in the
@@ -1000,8 +1161,8 @@ specified output directory. If the history does not contain the required data fo
 will simply return without generating any plots.
 
 Args:
-- history (Dict[str, List[float]]): A dictionary containing lists of loss and metric values for each epoch.
-  Expected keys include "train_loss", "val_loss", "precision", "recall", "f1", and "mean_iou".
+- history (Dict[str, List[float]]): A dictionary containing lists of epoch, loss, and metric values.
+  Expected keys include "epochs", "train_loss", "val_loss", "precision", "recall", "f1", and "mean_iou".
 - output_dir (Path): The directory where the generated plots should be saved.
 - plt: The Matplotlib pyplot module used for plotting. This should be obtained from the get_plotting_backend() function.
 
@@ -1018,12 +1179,14 @@ def save_training_plots(
         return
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    epochs = list(range(1, len(history["train_loss"]) + 1))
+    epochs = history.get("epochs", [])
+    if len(epochs) != len(history["train_loss"]):
+        epochs = list(range(1, len(history["train_loss"]) + 1))
 
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.plot(epochs, history["train_loss"], label="Train loss")
     if history.get("val_loss"):
-        ax.plot(epochs, history["val_loss"], label="Val loss")
+        ax.plot(epochs[: len(history["val_loss"])], history["val_loss"], label="Val loss")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
     ax.set_title("Training vs Validation Loss")
@@ -1396,11 +1559,11 @@ def run_deploy_inference(
 Description:
 This function saves the training checkpoint for the model, including the model state, optimizer state,
 scheduler state, current epoch, best monitored validation value, best validation loss, best F1 score,
-early-stopping state, and dataset information. The checkpoint is saved to the specified output directory,
-with a filename indicating whether it is the last checkpoint or the best checkpoint based on the selected
-monitor metric. The function creates the output directory if it does not exist, and saves the checkpoint
-using PyTorch's torch.save() function. The checkpoint includes all necessary information to resume training
-or to evaluate the model later.
+early-stopping state, plotting history, and dataset information. The checkpoint is saved to the specified
+output directory, with a filename indicating whether it is the last checkpoint or the best checkpoint based
+on the selected monitor metric. The function creates the output directory if it does not exist, and saves
+the checkpoint using PyTorch's torch.save() function. The checkpoint includes all necessary information to
+resume training or to evaluate the model later.
 
 Args:
 - output_dir (Path): The directory where the checkpoint should be saved.
@@ -1417,6 +1580,7 @@ Args:
 - epochs_without_improve (int): Number of consecutive epochs without enough monitor improvement.
 - dataset_info (DatasetInfo): The dataset information containing category and label mappings to
      be saved in the checkpoint.
+- history (Dict[str, List[float]]): Training history used to resume graphical plots.
 - is_best (bool): A flag indicating whether this checkpoint is the best one based on the metric,
      which determines the filename.
 
@@ -1437,6 +1601,7 @@ def save_checkpoint(
     best_f1: float,
     epochs_without_improve: int,
     dataset_info: DatasetInfo,
+    history: Dict[str, List[float]],
     is_best: bool,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1454,6 +1619,7 @@ def save_checkpoint(
         "epochs_without_improve": epochs_without_improve,
         "category_id_to_label": dataset_info.category_id_to_label,
         "label_to_name": dataset_info.label_to_name,
+        "training_history": copy_training_history(history),
     }
     last_path = output_dir / "model_last.pth"
     torch.save(state, last_path)
@@ -1973,14 +2139,7 @@ def main() -> None:
     best_monitor_value = initial_best_monitor_value(monitor_mode)
     epochs_without_improve = 0
     start_epoch = 1
-    history = {
-        "train_loss": [],
-        "val_loss": [],
-        "precision": [],
-        "recall": [],
-        "f1": [],
-        "mean_iou": [],
-    }
+    history = create_training_history()
 
     if args.resume:
         if args.test_only:
@@ -1988,7 +2147,8 @@ def main() -> None:
             logging.info("Loaded model weights from %s", args.resume)
         else:
             logging.warning("--resume flag is set without --test-only; Please ensure the optimizer param group keys match the checkpoint (e.g., same --trainable-backbone-layers, --min-size, --max-size, and pretrained settings as the original run).")
-            checkpoint = load_checkpoint(Path(args.resume), model, optimizer, scheduler)
+            resume_path = Path(args.resume)
+            checkpoint = load_checkpoint(resume_path, model, optimizer, scheduler)
             start_epoch = checkpoint.get("epoch", 0) + 1
             best_f1 = checkpoint.get("best_f1", checkpoint.get("best_metric", 0.0))
             best_val_loss = checkpoint.get("best_val_loss", float("inf"))
@@ -1998,6 +2158,22 @@ def main() -> None:
                 monitor_mode,
             )
             epochs_without_improve = int(checkpoint.get("epochs_without_improve", 0))
+            history, history_source = restore_training_history(
+                checkpoint=checkpoint,
+                resume_path=resume_path,
+                output_dir=output_dir,
+                max_epoch=start_epoch - 1,
+            )
+            if history_source:
+                logging.info(
+                    "Restored plotting history for %d epoch(s) from %s.",
+                    len(history["train_loss"]),
+                    history_source,
+                )
+            elif start_epoch > 1:
+                logging.warning(
+                    "No plotting history found in checkpoint or train.log; graphical plots will include only newly trained epochs."
+                )
             logging.info("Resumed from %s (epoch %d)", args.resume, start_epoch - 1)
 
     if args.test_only:
@@ -2030,10 +2206,14 @@ def main() -> None:
     graphical_dir = output_dir / "graphical_results"
     if plot_backend is None:
         logging.warning("matplotlib not available; skipping graphical results.")
+    elif history["train_loss"]:
+        save_training_plots(history, graphical_dir, plot_backend)
 
-    logging.info("Training started for %d epochs...", args.epochs)
 
     for epoch in range(start_epoch, args.epochs + 1):
+        start_time = datetime.now()
+        logging.info("Training started for %d epochs...", args.epochs)
+
         train_loss = train_one_epoch(
             model=model,
             optimizer=optimizer,
@@ -2044,8 +2224,8 @@ def main() -> None:
             max_norm=args.max_grad_norm,
             print_freq=args.print_freq,
         )
-        
-        logging.info("Completed epoch %d training. Computing validation metrics...", epoch)
+
+        logging.info("Completed epoch %d training in %.2f seconds. Computing validation metrics...", epoch, (datetime.now() - start_time).total_seconds())
 
         val_loss = compute_validation_loss(
             model=model,
@@ -2086,12 +2266,7 @@ def main() -> None:
             ", ".join(f"{group['lr']:.6g}" for group in optimizer.param_groups),
         )
 
-        history["train_loss"].append(train_loss)
-        history["val_loss"].append(val_loss)
-        history["precision"].append(metrics["precision"])
-        history["recall"].append(metrics["recall"])
-        history["f1"].append(metrics["f1"])
-        history["mean_iou"].append(metrics["mean_iou"])
+        append_training_history(history, epoch, train_loss, val_loss, metrics)
 
         if plot_backend is not None:
             save_training_plots(history, graphical_dir, plot_backend)
@@ -2126,6 +2301,7 @@ def main() -> None:
             best_f1=best_f1,
             epochs_without_improve=epochs_without_improve,
             dataset_info=dataset_info,
+            history=history,
             is_best=is_best,
         )
 
@@ -2142,6 +2318,8 @@ def main() -> None:
                 epochs_without_improve,
             )
             break
+
+        logging.info("Epoch %d completed. Time taken: %.2f seconds.", epoch, (datetime.now() - start_time).total_seconds())
 
     logging.info(
         "Training complete. Best %s: %.4f | Best F1: %.4f | Best val loss: %.4f",
