@@ -1888,7 +1888,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs.")
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size for training and validation.")
     parser.add_argument("--num-workers", type=int, default=0 if os.name == "nt" else 4, help="Number of worker processes for data loading.")
-    parser.add_argument("--learning-rate", type=float, default=0.01, help="Learning rate for the optimizer.")
+    parser.add_argument("--learning-rate", type=float, default=0.001, help="Learning rate for the optimizer.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for the optimizer.")
     parser.add_argument("--weight-decay", type=float, default=0.0001, help="Weight decay for the optimizer.")
     parser.add_argument("--lr-step-size", type=int, default=3, help="Step size for the learning rate scheduler.")
@@ -1900,7 +1900,7 @@ def parse_args() -> argparse.Namespace:
         choices=["step", "plateau", "cosine", "none"],
         help="Learning rate scheduler type.",
     )
-    parser.add_argument("--plateau-patience", type=int, default=3, help="Patience for ReduceLROnPlateau.")
+    parser.add_argument("--plateau-patience", type=int, default=0, help="Patience for ReduceLROnPlateau.")
     parser.add_argument("--plateau-factor", type=float, default=0.5, help="Factor for ReduceLROnPlateau.")
     parser.add_argument("--plateau-min-lr", type=float, default=1e-6, help="Minimum LR for ReduceLROnPlateau.")
     parser.add_argument("--cosine-t-max", type=int, default=0, help="T_max for CosineAnnealingLR (0 uses epochs).")
