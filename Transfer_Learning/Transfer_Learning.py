@@ -1888,7 +1888,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs.")
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size for training and validation.")
     parser.add_argument("--num-workers", type=int, default=0 if os.name == "nt" else 4, help="Number of worker processes for data loading.")
-    parser.add_argument("--learning-rate", type=float, default=0.001, help="Learning rate for the optimizer.")
+    parser.add_argument("--learning-rate", type=float, default=0.01, help="Learning rate for the optimizer.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for the optimizer.")
     parser.add_argument("--weight-decay", type=float, default=0.0001, help="Weight decay for the optimizer.")
     parser.add_argument("--lr-step-size", type=int, default=3, help="Step size for the learning rate scheduler.")
