@@ -2212,7 +2212,7 @@ def main() -> None:
 
     for epoch in range(start_epoch, args.epochs + 1):
         start_time = datetime.now()
-        logging.info("Training started for %d epochs...", args.epochs)
+        logging.info("Training started for %d/%d epochs...", epoch, args.epochs)
 
         train_loss = train_one_epoch(
             model=model,
