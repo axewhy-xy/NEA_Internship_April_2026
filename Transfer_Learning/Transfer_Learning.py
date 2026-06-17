@@ -1900,7 +1900,7 @@ def parse_args() -> argparse.Namespace:
         choices=["step", "plateau", "cosine", "none"],
         help="Learning rate scheduler type.",
     )
-    parser.add_argument("--plateau-patience", type=int, default=0, help="Patience for ReduceLROnPlateau.")
+    parser.add_argument("--plateau-patience", type=int, default=3, help="Patience for ReduceLROnPlateau.")
     parser.add_argument("--plateau-factor", type=float, default=0.5, help="Factor for ReduceLROnPlateau.")
     parser.add_argument("--plateau-min-lr", type=float, default=1e-6, help="Minimum LR for ReduceLROnPlateau.")
     parser.add_argument("--cosine-t-max", type=int, default=0, help="T_max for CosineAnnealingLR (0 uses epochs).")
@@ -2127,6 +2127,7 @@ def main() -> None:
             lr=args.learning_rate,
             weight_decay=args.weight_decay,
         )
+    logging.info("Using %s optimizer with learning rate %.6g", args.optimizer, args.learning_rate)
 
     monitor_mode = resolve_monitor_mode(args.monitor_metric, args.monitor_mode)
     logging.info(
