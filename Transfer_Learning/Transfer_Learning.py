@@ -1921,6 +1921,14 @@ def parse_args() -> argparse.Namespace:
         help="Whether lower or higher monitor values are better (auto uses min for val_loss, max otherwise).",
     )
 
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        default="sgd",
+        choices=["sgd", "adam", "adamw"],
+        help="Optimizer to use for training."
+    )
+
     parser.add_argument("--trainable-backbone-layers", type=int, default=3, help="Number of trainable backbone layers.")
     parser.add_argument("--min-size", type=int, default=None, help="Minimum image size.")
     parser.add_argument("--max-size", type=int, default=None, help="Maximum image size.")
@@ -1986,6 +1994,9 @@ def main() -> None:
     run_id = args.run_name.strip() or datetime.now().strftime("%Y%m%d-%H%M%S")
     output_dir = Path(args.output_root) / run_id
     setup_logging(output_dir)
+
+    if args.optimizer in ["adam", "adamw"] and args.learning_rate > 0.001:
+        logging.warning("Selected optimizer %s typically uses a lower learning rate than %.6g; consider reducing --learning-rate for better performance.", args.optimizer, args.learning_rate)
 
     logging.info("Starting run %s", run_id)
     logging.info("Arguments: %s", args)
@@ -2097,12 +2108,26 @@ def main() -> None:
     )
     model.to(device)
 
-    optimizer = torch.optim.SGD(
-        [param for param in model.parameters() if param.requires_grad],
-        lr=args.learning_rate,
-        momentum=args.momentum,
-        weight_decay=args.weight_decay,
-    )
+    if args.optimizer == "sgd":
+        optimizer = torch.optim.SGD(
+            [param for param in model.parameters() if param.requires_grad],
+            lr=args.learning_rate,
+            momentum=args.momentum,
+            weight_decay=args.weight_decay,
+        )
+    elif args.optimizer == "adam":
+        optimizer = torch.optim.Adam(
+            [param for param in model.parameters() if param.requires_grad],
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay,
+        )
+    elif args.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(
+            [param for param in model.parameters() if param.requires_grad],
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay,
+        )
+
     monitor_mode = resolve_monitor_mode(args.monitor_metric, args.monitor_mode)
     logging.info(
         "Monitoring validation %s for best checkpoint, plateau scheduling, and early stopping (%s is better).",
