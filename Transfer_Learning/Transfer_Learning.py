@@ -3,7 +3,7 @@ Transfer Learning for object detection on HDB features using satellite imagery a
 
 Author: AxeWhy
 Date: 30/05/2026
-Last Updated: 16/06/2026
+Last Updated: 22/06/2026
 
 Description:
 This script implements transfer learning for object detection on HDB features using satellite imagery
@@ -744,6 +744,134 @@ Returns:
 - Dict[str, float]: A dictionary containing the evaluation metrics: precision, recall, F1 score, and mean IoU.
 
 """
+DETECTION_METRIC_KEYS = ("precision", "recall", "f1", "mean_iou")
+DEFAULT_MONITOR_SCORE_THRESHOLDS = (0.5, 0.25, 0.1, 0.05)
+
+def normalize_score_thresholds(
+    score_threshold: float,
+    score_thresholds: Optional[Iterable[float]] = None,
+) -> List[float]:
+    raw_thresholds = [score_threshold]
+    if score_thresholds is not None:
+        raw_thresholds.extend(score_thresholds)
+
+    thresholds = sorted(
+        {
+            min(1.0, max(0.0, float(threshold)))
+            for threshold in raw_thresholds
+        },
+        reverse=True,
+    )
+    return thresholds or [float(score_threshold)]
+
+def validation_score_thresholds(
+    monitor_metric: str,
+    score_threshold: float,
+) -> List[float]:
+    if monitor_metric == "val_loss":
+        return normalize_score_thresholds(score_threshold)
+
+    candidates = [score_threshold]
+    candidates.extend(
+        threshold
+        for threshold in DEFAULT_MONITOR_SCORE_THRESHOLDS
+        if threshold <= score_threshold
+    )
+    return normalize_score_thresholds(score_threshold, candidates)
+
+def empty_metric_counts() -> Dict[str, float]:
+    return {
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "sum_iou": 0.0,
+        "match_count": 0,
+    }
+
+def counts_to_metrics(counts: Dict[str, float]) -> Dict[str, float]:
+    tp = int(counts["tp"])
+    fp = int(counts["fp"])
+    fn = int(counts["fn"])
+    match_count = int(counts["match_count"])
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    mean_iou = counts["sum_iou"] / match_count if match_count > 0 else 0.0
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "mean_iou": mean_iou,
+    }
+
+def add_detection_matches(
+    counts: Dict[str, float],
+    gt_boxes: torch.Tensor,
+    gt_labels: torch.Tensor,
+    pred_boxes: torch.Tensor,
+    pred_labels: torch.Tensor,
+    pred_scores: torch.Tensor,
+    iou_threshold: float,
+) -> None:
+    label_set = set(gt_labels.tolist()) | set(pred_labels.tolist())
+    for label in label_set:
+        gt_mask = gt_labels == label
+        pred_mask = pred_labels == label
+        gt = gt_boxes[gt_mask]
+        pred = pred_boxes[pred_mask]
+        pred_score_label = pred_scores[pred_mask]
+
+        if len(gt) == 0 and len(pred) == 0:
+            continue
+        if len(gt) == 0:
+            counts["fp"] += len(pred)
+            continue
+        if len(pred) == 0:
+            counts["fn"] += len(gt)
+            continue
+
+        order = torch.argsort(pred_score_label, descending=True)
+        pred = pred[order]
+        ious = box_iou(pred, gt)
+        matched_gt = set()
+
+        for pred_idx in range(pred.shape[0]):
+            iou_row = ious[pred_idx]
+            max_iou, gt_idx = torch.max(iou_row, dim=0)
+            if max_iou >= iou_threshold and int(gt_idx) not in matched_gt:
+                counts["tp"] += 1
+                matched_gt.add(int(gt_idx))
+                counts["sum_iou"] += float(max_iou)
+                counts["match_count"] += 1
+            else:
+                counts["fp"] += 1
+
+        counts["fn"] += len(gt) - len(matched_gt)
+
+def select_metrics_for_monitor(
+    metrics_by_threshold: Dict[float, Dict[str, float]],
+    score_threshold: float,
+    select_metric: Optional[str],
+) -> Dict[str, float]:
+    if select_metric is None or select_metric == "val_loss":
+        selected_threshold = normalize_score_thresholds(score_threshold)[0]
+    else:
+        selected_threshold = max(
+            metrics_by_threshold,
+            key=lambda threshold: (
+                metrics_by_threshold[threshold][select_metric],
+                metrics_by_threshold[threshold]["f1"],
+                metrics_by_threshold[threshold]["recall"],
+                metrics_by_threshold[threshold]["precision"],
+                metrics_by_threshold[threshold]["mean_iou"],
+                threshold,
+            ),
+        )
+
+    metrics = dict(metrics_by_threshold[selected_threshold])
+    metrics["score_threshold"] = float(selected_threshold)
+    return metrics
+
 def evaluate(
     model: nn.Module,
     data_loader: DataLoader,
@@ -751,11 +879,15 @@ def evaluate(
     score_threshold: float,
     iou_threshold: float,
     nms_iou_threshold: float,
+    score_thresholds: Optional[Iterable[float]] = None,
+    select_metric: Optional[str] = None,
 ) -> Dict[str, float]:
     model.eval()
-    tp = fp = fn = 0
-    sum_iou = 0.0
-    match_count = 0
+    thresholds = normalize_score_thresholds(score_threshold, score_thresholds)
+    counts_by_threshold = {
+        threshold: empty_metric_counts()
+        for threshold in thresholds
+    }
 
     with torch.no_grad():
         for images, targets in data_loader:
@@ -766,64 +898,37 @@ def evaluate(
                 gt_boxes = target["boxes"].cpu()
                 gt_labels = target["labels"].cpu()
 
-                pred_scores = output["scores"].cpu()
-                keep = pred_scores >= score_threshold
-                pred_boxes = output["boxes"].cpu()[keep]
-                pred_labels = output["labels"].cpu()[keep]
-                pred_scores = pred_scores[keep]
+                all_pred_scores = output["scores"].cpu()
+                all_pred_boxes = output["boxes"].cpu()
+                all_pred_labels = output["labels"].cpu()
 
-                pred_boxes, pred_scores, pred_labels = apply_nms(
-                    pred_boxes,
-                    pred_scores,
-                    pred_labels,
-                    nms_iou_threshold,
-                )
+                for threshold in thresholds:
+                    keep = all_pred_scores >= threshold
+                    pred_boxes = all_pred_boxes[keep]
+                    pred_labels = all_pred_labels[keep]
+                    pred_scores = all_pred_scores[keep]
 
-                label_set = set(gt_labels.tolist()) | set(pred_labels.tolist())
-                for label in label_set:
-                    gt_mask = gt_labels == label
-                    pred_mask = pred_labels == label
-                    gt = gt_boxes[gt_mask]
-                    pred = pred_boxes[pred_mask]
-                    pred_score_label = pred_scores[pred_mask]
+                    pred_boxes, pred_scores, pred_labels = apply_nms(
+                        pred_boxes,
+                        pred_scores,
+                        pred_labels,
+                        nms_iou_threshold,
+                    )
+                    add_detection_matches(
+                        counts_by_threshold[threshold],
+                        gt_boxes,
+                        gt_labels,
+                        pred_boxes,
+                        pred_labels,
+                        pred_scores,
+                        iou_threshold,
+                    )
 
-                    if len(gt) == 0 and len(pred) == 0:
-                        continue
-                    if len(gt) == 0:
-                        fp += len(pred)
-                        continue
-                    if len(pred) == 0:
-                        fn += len(gt)
-                        continue
-
-                    order = torch.argsort(pred_score_label, descending=True)
-                    pred = pred[order]
-                    ious = box_iou(pred, gt)
-                    matched_gt = set()
-
-                    for pred_idx in range(pred.shape[0]):
-                        iou_row = ious[pred_idx]
-                        max_iou, gt_idx = torch.max(iou_row, dim=0)
-                        if max_iou >= iou_threshold and int(gt_idx) not in matched_gt:
-                            tp += 1
-                            matched_gt.add(int(gt_idx))
-                            sum_iou += float(max_iou)
-                            match_count += 1
-                        else:
-                            fp += 1
-
-                    fn += len(gt) - len(matched_gt)
-
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-    mean_iou = sum_iou / match_count if match_count > 0 else 0.0
-    return {
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "mean_iou": mean_iou,
+    metrics_by_threshold = {
+        threshold: counts_to_metrics(counts)
+        for threshold, counts in counts_by_threshold.items()
     }
+    return select_metrics_for_monitor(metrics_by_threshold, score_threshold, select_metric)
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -1910,7 +2015,7 @@ def parse_args() -> argparse.Namespace:
         "--monitor-metric",
         type=str,
         default="val_loss",
-        choices=["val_loss", "precision", "recall", "f1", "mean_iou"],
+        choices=["val_loss", *DETECTION_METRIC_KEYS],
         help="Validation metric used for best checkpoint, ReduceLROnPlateau, and early stopping.",
     )
     parser.add_argument(
@@ -2135,6 +2240,15 @@ def main() -> None:
         args.monitor_metric,
         "lower" if monitor_mode == "min" else "higher",
     )
+    val_score_thresholds = validation_score_thresholds(args.monitor_metric, args.score_threshold)
+    if len(val_score_thresholds) > 1:
+        logging.info(
+            "Validation metric monitor will select the best %s over score thresholds: %s",
+            args.monitor_metric,
+            ", ".join(f"{threshold:.3g}" for threshold in val_score_thresholds),
+        )
+    else:
+        logging.info("Validation metrics will use score threshold %.3g", val_score_thresholds[0])
 
     scheduler = None
     if args.lr_scheduler == "step":
@@ -2269,6 +2383,8 @@ def main() -> None:
             score_threshold=args.score_threshold,
             iou_threshold=args.iou_threshold,
             nms_iou_threshold=args.nms_iou_threshold,
+            score_thresholds=val_score_thresholds,
+            select_metric=args.monitor_metric,
         )
         monitor_value = get_monitor_value(args.monitor_metric, val_loss, metrics)
 
@@ -2279,7 +2395,7 @@ def main() -> None:
                 scheduler.step()
 
         logging.info(
-            "Epoch %d | Train loss %.4f | Val loss %.4f | Val precision %.4f | Val recall %.4f | Val F1 %.4f | Val mIoU %.4f | Monitor %s %.4f | LR %s",
+            "Epoch %d | Train loss %.4f | Val loss %.4f | Val precision %.4f | Val recall %.4f | Val F1 %.4f | Val mIoU %.4f | Val score threshold %.3g | Monitor %s %.4f | LR %s",
             epoch,
             train_loss,
             val_loss,
@@ -2287,6 +2403,7 @@ def main() -> None:
             metrics["recall"],
             metrics["f1"],
             metrics["mean_iou"],
+            metrics.get("score_threshold", args.score_threshold),
             args.monitor_metric,
             monitor_value,
             ", ".join(f"{group['lr']:.6g}" for group in optimizer.param_groups),
