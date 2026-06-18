@@ -1904,7 +1904,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--plateau-factor", type=float, default=0.5, help="Factor for ReduceLROnPlateau.")
     parser.add_argument("--plateau-min-lr", type=float, default=1e-6, help="Minimum LR for ReduceLROnPlateau.")
     parser.add_argument("--cosine-t-max", type=int, default=0, help="T_max for CosineAnnealingLR (0 uses epochs).")
-    parser.add_argument("--cosine-min-lr", type=float, default=0.0, help="Minimum LR for CosineAnnealingLR.")
+    parser.add_argument("--cosine-min-lr", type=float, default=0.000001, help="Minimum LR for CosineAnnealingLR.")
     parser.add_argument("--max-grad-norm", type=float, default=1.0, help="Maximum norm for gradient clipping.")
     parser.add_argument(
         "--monitor-metric",
