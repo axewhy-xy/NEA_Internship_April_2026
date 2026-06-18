@@ -719,34 +719,27 @@ def compute_validation_loss(
 
     return running_loss / max(1, len(data_loader))
 
-"""
-# ----------------------------------------------------------------------------------------------------
-# evaluate()
-# ----------------------------------------------------------------------------------------------------
-Description:
-This function evaluates the performance of the given model on the provided data loader using object
-detection metrics. It computes true positives, false positives, false negatives, and mean IoU based on
-the model's predictions and the ground truth annotations. The function applies a score threshold to filter
-predictions, and uses non-maximum suppression (NMS) to remove duplicate detections. It then calculates 
-precision, recall, F1 score, and mean IoU based on the matches between predictions and ground truth boxes.
-The function returns a dictionary containing these evaluation metrics.
-
-Args:
-- model (nn.Module): The model to be evaluated.
-- data_loader (DataLoader): The DataLoader providing the evaluation data.
-- device (torch.device): The device on which to perform the evaluation (e.g., torch.device('cuda') or
-    torch.device('cpu')).
-- score_threshold (float): The minimum confidence score required for a prediction to be considered valid.
-- iou_threshold (float): The IoU threshold for determining true positives when matching predictions to ground truth.
-- nms_iou_threshold (float): The IoU threshold to use for non-maximum suppression to filter out duplicate detections.
-
-Returns:
-- Dict[str, float]: A dictionary containing the evaluation metrics: precision, recall, F1 score, and mean IoU.
-
-"""
 DETECTION_METRIC_KEYS = ("precision", "recall", "f1", "mean_iou")
 DEFAULT_MONITOR_SCORE_THRESHOLDS = (0.5, 0.25, 0.1, 0.05)
+"""
+# ----------------------------------------------------------------------------------------------------
+# normalize_score_thresholds()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function normalizes a list of score thresholds for object detection evaluation. It takes a primary
+score threshold and an optional iterable of additional score thresholds. The function ensures that all
+thresholds are within the valid range [0, 1]. It returns a sorted list of unique thresholds in descending
+order. If no valid thresholds are provided, it defaults to returning a list containing the primary score
+threshold.
 
+Args:
+- score_threshold (float): The primary score threshold to be normalized.
+- score_thresholds (Optional[Iterable[float]]): An optional iterable of additional score thresholds to be normalized.
+
+Returns:
+- List[float]: A sorted list of unique score thresholds in descending order, all within the range [0, 1].
+
+"""
 def normalize_score_thresholds(
     score_threshold: float,
     score_thresholds: Optional[Iterable[float]] = None,
@@ -764,6 +757,25 @@ def normalize_score_thresholds(
     )
     return thresholds or [float(score_threshold)]
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# validation_score_thresholds()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function determines the appropriate score thresholds to use for validation based on the specified
+monitor metric and a primary score threshold. If the monitor metric is "val_loss", it normalizes the
+primary score threshold and returns it as a single-element list. For other metrics, it generates a list
+of candidate thresholds that are less than or equal to the primary score threshold, normalizes them,
+and returns the resulting list.
+
+Args:
+- monitor_metric (str): The validation metric being monitored (e.g., "val_loss", "precision", "recall").
+- score_threshold (float): The primary score threshold to be used for validation.
+
+Returns:
+- List[float]: A list of normalized score thresholds to be used for validation, based on the monitor metric
+
+"""
 def validation_score_thresholds(
     monitor_metric: str,
     score_threshold: float,
@@ -779,6 +791,23 @@ def validation_score_thresholds(
     )
     return normalize_score_thresholds(score_threshold, candidates)
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# empty_metric_counts()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function initializes a dictionary to keep track of the counts needed for computing object detection
+metrics. It returns a dictionary with keys for true positives (tp), false positives (fp), false negatives (fn),
+the sum of Intersection over Union (sum_iou), and the count of matches (match_count). All values are
+initialized to zero.
+
+Args:
+- None
+
+Returns:
+- Dict[str, float]: A dictionary with keys "tp", "fp", "fn", "sum_iou", and "match_count", all initialized to 0.0.
+
+"""
 def empty_metric_counts() -> Dict[str, float]:
     return {
         "tp": 0,
@@ -788,6 +817,23 @@ def empty_metric_counts() -> Dict[str, float]:
         "match_count": 0,
     }
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# counts_to_metrics()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function converts the counts of true positives, false positives, false negatives, and the sum of
+Intersection over Union (IoU) into standard object detection metrics: precision, recall, F1 score,
+and mean IoU. It takes a dictionary of counts as input and computes each metric based on the counts.
+
+Args:
+- counts (Dict[str, float]): A dictionary containing the counts of true positives ("tp"), false positives ("fp"),
+  false negatives ("fn"), the sum of IoU ("sum_iou"), and the count of matches ("match_count").
+
+Returns:
+- Dict[str, float]: A dictionary containing the computed metrics: "precision", "recall", "f1", and "mean_iou".
+
+"""
 def counts_to_metrics(counts: Dict[str, float]) -> Dict[str, float]:
     tp = int(counts["tp"])
     fp = int(counts["fp"])
@@ -804,6 +850,33 @@ def counts_to_metrics(counts: Dict[str, float]) -> Dict[str, float]:
         "mean_iou": mean_iou,
     }
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# add_detection_matches()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function updates the counts of true positives, false positives, false negatives, and the sum of
+Intersection over Union (IoU) based on the matches between predicted bounding boxes and ground truth
+bounding boxes.
+
+Args:
+- counts (Dict[str, float]): A dictionary containing the current counts of true positives ("tp"), 
+  false positives ("fp"), false negatives ("fn"), the sum of IoU ("sum_iou"), and the count of 
+  matches ("match_count").
+- gt_boxes (torch.Tensor): A tensor containing the ground truth bounding boxes for the current image.
+- gt_labels (torch.Tensor): A tensor containing the ground truth labels corresponding to the ground
+  truth bounding boxes.
+- pred_boxes (torch.Tensor): A tensor containing the predicted bounding boxes for the current image.
+- pred_labels (torch.Tensor): A tensor containing the predicted labels corresponding to the predicted
+  bounding boxes.
+- pred_scores (torch.Tensor): A tensor containing the confidence scores for the predicted bounding boxes.
+- iou_threshold (float): The Intersection over Union (IoU) threshold used to determine whether a predicted
+    bounding box matches a ground truth bounding box.
+
+Returns:
+- None: The function updates the counts dictionary in place and does not return any value.
+
+"""
 def add_detection_matches(
     counts: Dict[str, float],
     gt_boxes: torch.Tensor,
@@ -848,6 +921,28 @@ def add_detection_matches(
 
         counts["fn"] += len(gt) - len(matched_gt)
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# select_metrics_for_monitor()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function selects the appropriate metrics for monitoring based on the provided score thresholds
+and the specified metric to monitor. It takes a dictionary of metrics computed at different score
+thresholds, a primary score threshold, and an optional metric to monitor. If the selected metric is
+"val_loss" or None, it normalizes the primary score threshold and selects the corresponding metrics.
+
+Args:
+- metrics_by_threshold (Dict[float, Dict[str, float]]): A dictionary mapping score thresholds to their
+  corresponding computed metrics.
+- score_threshold (float): The primary score threshold to be used for selecting metrics.
+- select_metric (Optional[str]): The metric to monitor. If None or "val_loss", the function selects
+    the metrics corresponding to the normalized primary score threshold.
+
+Returns:
+- Dict[str, float]: A dictionary containing the selected metrics for monitoring, including the score
+    threshold used for selection.
+    
+"""
 def select_metrics_for_monitor(
     metrics_by_threshold: Dict[float, Dict[str, float]],
     score_threshold: float,
@@ -872,6 +967,31 @@ def select_metrics_for_monitor(
     metrics["score_threshold"] = float(selected_threshold)
     return metrics
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# evaluate()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function evaluates the performance of the given model on the provided data loader using object
+detection metrics. It computes true positives, false positives, false negatives, and mean IoU based on
+the model's predictions and the ground truth annotations. The function applies a score threshold to filter
+predictions, and uses non-maximum suppression (NMS) to remove duplicate detections. It then calculates 
+precision, recall, F1 score, and mean IoU based on the matches between predictions and ground truth boxes.
+The function returns a dictionary containing these evaluation metrics.
+
+Args:
+- model (nn.Module): The model to be evaluated.
+- data_loader (DataLoader): The DataLoader providing the evaluation data.
+- device (torch.device): The device on which to perform the evaluation (e.g., torch.device('cuda') or
+    torch.device('cpu')).
+- score_threshold (float): The minimum confidence score required for a prediction to be considered valid.
+- iou_threshold (float): The IoU threshold for determining true positives when matching predictions to ground truth.
+- nms_iou_threshold (float): The IoU threshold to use for non-maximum suppression to filter out duplicate detections.
+
+Returns:
+- Dict[str, float]: A dictionary containing the evaluation metrics: precision, recall, F1 score, and mean IoU.
+
+"""
 def evaluate(
     model: nn.Module,
     data_loader: DataLoader,
