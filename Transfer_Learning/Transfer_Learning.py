@@ -719,7 +719,7 @@ def compute_validation_loss(
 
     return running_loss / max(1, len(data_loader))
 
-DETECTION_METRIC_KEYS = ("precision", "recall", "f1", "mean_iou")
+DETECTION_METRIC_KEYS = ("precision", "recall", "f1", "mean_iou", "map")
 DEFAULT_MONITOR_SCORE_THRESHOLDS = (0.5, 0.25, 0.1, 0.05)
 """
 # ----------------------------------------------------------------------------------------------------
@@ -780,7 +780,7 @@ def validation_score_thresholds(
     monitor_metric: str,
     score_threshold: float,
 ) -> List[float]:
-    if monitor_metric == "val_loss":
+    if monitor_metric in {"val_loss", "map"}:
         return normalize_score_thresholds(score_threshold)
 
     candidates = [score_threshold]
@@ -923,6 +923,93 @@ def add_detection_matches(
 
 """
 # ----------------------------------------------------------------------------------------------------
+# average_precision_for_class()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper computes interpolated average precision for one class from dataset-wide detections sorted by
+confidence. It uses one-to-one matching with the configured IoU threshold, so duplicate detections for the
+same ground-truth box count as false positives.
+"""
+def average_precision_for_class(
+    gt_boxes_by_image: Dict[int, torch.Tensor],
+    detections: List[Tuple[float, int, torch.Tensor]],
+    iou_threshold: float,
+) -> float:
+    total_gt = sum(int(boxes.shape[0]) for boxes in gt_boxes_by_image.values())
+    if total_gt == 0:
+        return 0.0
+    if not detections:
+        return 0.0
+
+    matched_by_image = {
+        image_id: torch.zeros((boxes.shape[0],), dtype=torch.bool)
+        for image_id, boxes in gt_boxes_by_image.items()
+    }
+    sorted_detections = sorted(detections, key=lambda item: item[0], reverse=True)
+    true_positives = torch.zeros((len(sorted_detections),), dtype=torch.float32)
+    false_positives = torch.zeros((len(sorted_detections),), dtype=torch.float32)
+
+    for detection_idx, (_, image_id, pred_box) in enumerate(sorted_detections):
+        gt_boxes = gt_boxes_by_image.get(image_id)
+        if gt_boxes is None or gt_boxes.numel() == 0:
+            false_positives[detection_idx] = 1.0
+            continue
+
+        ious = box_iou(pred_box.view(1, 4), gt_boxes).squeeze(0)
+        max_iou, gt_idx = torch.max(ious, dim=0)
+        gt_idx_int = int(gt_idx)
+        if max_iou >= iou_threshold and not bool(matched_by_image[image_id][gt_idx_int]):
+            true_positives[detection_idx] = 1.0
+            matched_by_image[image_id][gt_idx_int] = True
+        else:
+            false_positives[detection_idx] = 1.0
+
+    cumulative_tp = torch.cumsum(true_positives, dim=0)
+    cumulative_fp = torch.cumsum(false_positives, dim=0)
+    recalls = cumulative_tp / float(total_gt)
+    precisions = cumulative_tp / torch.clamp(cumulative_tp + cumulative_fp, min=1e-12)
+
+    recalls = torch.cat([torch.tensor([0.0]), recalls, torch.tensor([1.0])])
+    precisions = torch.cat([torch.tensor([0.0]), precisions, torch.tensor([0.0])])
+    for index in range(precisions.numel() - 2, -1, -1):
+        precisions[index] = torch.maximum(precisions[index], precisions[index + 1])
+
+    recall_steps = torch.nonzero(recalls[1:] != recalls[:-1], as_tuple=False).squeeze(1)
+    ap = torch.sum((recalls[recall_steps + 1] - recalls[recall_steps]) * precisions[recall_steps + 1])
+    return float(ap)
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# mean_average_precision()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper averages per-class AP over classes that have at least one ground-truth box in the evaluated
+split. The resulting value is mAP at the configured IoU threshold.
+"""
+def mean_average_precision(
+    gt_boxes_by_class: Dict[int, Dict[int, torch.Tensor]],
+    detections_by_class: Dict[int, List[Tuple[float, int, torch.Tensor]]],
+    iou_threshold: float,
+) -> float:
+    class_average_precisions = []
+    for label, gt_boxes_by_image in gt_boxes_by_class.items():
+        total_gt = sum(int(boxes.shape[0]) for boxes in gt_boxes_by_image.values())
+        if total_gt == 0:
+            continue
+        class_average_precisions.append(
+            average_precision_for_class(
+                gt_boxes_by_image=gt_boxes_by_image,
+                detections=detections_by_class.get(label, []),
+                iou_threshold=iou_threshold,
+            )
+        )
+
+    if not class_average_precisions:
+        return 0.0
+    return sum(class_average_precisions) / len(class_average_precisions)
+
+"""
+# ----------------------------------------------------------------------------------------------------
 # select_metrics_for_monitor()
 # ----------------------------------------------------------------------------------------------------
 Description:
@@ -948,7 +1035,7 @@ def select_metrics_for_monitor(
     score_threshold: float,
     select_metric: Optional[str],
 ) -> Dict[str, float]:
-    if select_metric is None or select_metric == "val_loss":
+    if select_metric is None or select_metric in {"val_loss", "map"}:
         selected_threshold = normalize_score_thresholds(score_threshold)[0]
     else:
         selected_threshold = max(
@@ -958,6 +1045,7 @@ def select_metrics_for_monitor(
                 metrics_by_threshold[threshold]["f1"],
                 metrics_by_threshold[threshold]["recall"],
                 metrics_by_threshold[threshold]["precision"],
+                metrics_by_threshold[threshold]["map"],
                 metrics_by_threshold[threshold]["mean_iou"],
                 threshold,
             ),
@@ -1008,6 +1096,9 @@ def evaluate(
         threshold: empty_metric_counts()
         for threshold in thresholds
     }
+    gt_boxes_by_class: Dict[int, Dict[int, torch.Tensor]] = defaultdict(dict)
+    detections_by_class: Dict[int, List[Tuple[float, int, torch.Tensor]]] = defaultdict(list)
+    fallback_image_id = 0
 
     with torch.no_grad():
         for images, targets in data_loader:
@@ -1017,23 +1108,43 @@ def evaluate(
             for output, target in zip(outputs, targets):
                 gt_boxes = target["boxes"].cpu()
                 gt_labels = target["labels"].cpu()
+                image_id_tensor = target.get("image_id")
+                if image_id_tensor is not None and image_id_tensor.numel() > 0:
+                    image_id = int(image_id_tensor.view(-1)[0].item())
+                else:
+                    image_id = fallback_image_id
+                fallback_image_id += 1
+
+                for label in torch.unique(gt_labels):
+                    label_id = int(label)
+                    gt_boxes_by_class[label_id][image_id] = gt_boxes[gt_labels == label].clone()
 
                 all_pred_scores = output["scores"].cpu()
                 all_pred_boxes = output["boxes"].cpu()
                 all_pred_labels = output["labels"].cpu()
 
-                for threshold in thresholds:
-                    keep = all_pred_scores >= threshold
-                    pred_boxes = all_pred_boxes[keep]
-                    pred_labels = all_pred_labels[keep]
-                    pred_scores = all_pred_scores[keep]
+                nms_pred_boxes, nms_pred_scores, nms_pred_labels = apply_nms(
+                    all_pred_boxes,
+                    all_pred_scores,
+                    all_pred_labels,
+                    nms_iou_threshold,
+                )
 
-                    pred_boxes, pred_scores, pred_labels = apply_nms(
-                        pred_boxes,
-                        pred_scores,
-                        pred_labels,
-                        nms_iou_threshold,
+                for pred_idx in range(nms_pred_boxes.shape[0]):
+                    label_id = int(nms_pred_labels[pred_idx])
+                    detections_by_class[label_id].append(
+                        (
+                            float(nms_pred_scores[pred_idx]),
+                            image_id,
+                            nms_pred_boxes[pred_idx].clone(),
+                        )
                     )
+
+                for threshold in thresholds:
+                    keep = nms_pred_scores >= threshold
+                    pred_boxes = nms_pred_boxes[keep]
+                    pred_labels = nms_pred_labels[keep]
+                    pred_scores = nms_pred_scores[keep]
                     add_detection_matches(
                         counts_by_threshold[threshold],
                         gt_boxes,
@@ -1044,8 +1155,13 @@ def evaluate(
                         iou_threshold,
                     )
 
+    map_value = mean_average_precision(
+        gt_boxes_by_class=gt_boxes_by_class,
+        detections_by_class=detections_by_class,
+        iou_threshold=iou_threshold,
+    )
     metrics_by_threshold = {
-        threshold: counts_to_metrics(counts)
+        threshold: {**counts_to_metrics(counts), "map": map_value}
         for threshold, counts in counts_by_threshold.items()
     }
     return select_metrics_for_monitor(metrics_by_threshold, score_threshold, select_metric)
@@ -1183,12 +1299,14 @@ def best_monitor_from_checkpoint(
 
     if monitor_metric == "val_loss" and "best_val_loss" in checkpoint:
         return float(checkpoint["best_val_loss"])
+    if monitor_metric == "map" and "best_map" in checkpoint:
+        return float(checkpoint["best_map"])
     if monitor_metric == "f1":
         return float(checkpoint.get("best_f1", checkpoint.get("best_metric", 0.0)))
 
     return initial_best_monitor_value(monitor_mode)
 
-TRAINING_HISTORY_KEYS = ("train_loss", "val_loss", "precision", "recall", "f1", "mean_iou")
+TRAINING_HISTORY_KEYS = ("train_loss", "val_loss", "precision", "recall", "f1", "mean_iou", "map")
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -1239,6 +1357,14 @@ def normalize_training_history(
     if value_count and len(history["epochs"]) != value_count:
         history["epochs"] = list(range(1, value_count + 1))
 
+    if history["epochs"]:
+        epoch_count = len(history["epochs"])
+        for key in TRAINING_HISTORY_KEYS:
+            values = history.get(key, [])
+            if len(values) < epoch_count:
+                values = values + [float("nan")] * (epoch_count - len(values))
+            history[key] = values[:epoch_count]
+
     if max_epoch is not None and history["epochs"]:
         keep_indices = [
             index for index, epoch in enumerate(history["epochs"])
@@ -1274,6 +1400,10 @@ def append_training_history(
         for key in TRAINING_HISTORY_KEYS:
             history[key] = history[key][:cutoff]
 
+    for key in TRAINING_HISTORY_KEYS:
+        if len(history[key]) < len(history["epochs"]):
+            history[key].extend([float("nan")] * (len(history["epochs"]) - len(history[key])))
+
     history["epochs"].append(epoch)
     history["train_loss"].append(float(train_loss))
     history["val_loss"].append(float(val_loss))
@@ -1281,6 +1411,7 @@ def append_training_history(
     history["recall"].append(float(metrics["recall"]))
     history["f1"].append(float(metrics["f1"]))
     history["mean_iou"].append(float(metrics["mean_iou"]))
+    history["map"].append(float(metrics["map"]))
 
 def load_training_history_from_log(
     log_path: Path,
@@ -1298,6 +1429,7 @@ def load_training_history_from_log(
         r"Val recall\s+(?P<recall>[-+0-9.eE]+)\s+\|\s+"
         r"Val F1\s+(?P<f1>[-+0-9.eE]+)\s+\|\s+"
         r"Val mIoU\s+(?P<mean_iou>[-+0-9.eE]+)"
+        r"(?:\s+\|\s+Val mAP\s+(?P<map>[-+0-9.eE]+))?"
     )
     metrics_by_epoch: Dict[int, Dict[str, float]] = {}
     try:
@@ -1309,10 +1441,10 @@ def load_training_history_from_log(
                 epoch = int(match.group("epoch"))
                 if max_epoch is not None and epoch > max_epoch:
                     continue
-                metrics_by_epoch[epoch] = {
-                    key: float(match.group(key))
-                    for key in TRAINING_HISTORY_KEYS
-                }
+                metrics_by_epoch[epoch] = {}
+                for key in TRAINING_HISTORY_KEYS:
+                    value = match.group(key)
+                    metrics_by_epoch[epoch][key] = float(value) if value is not None else float("nan")
     except OSError as exc:
         logging.warning("Could not read plotting history from %s: %s", log_path, exc)
         return history
@@ -1426,12 +1558,13 @@ def save_training_plots(
         ("recall", "Recall"),
         ("f1", "F1"),
         ("mean_iou", "Mean IoU"),
+        ("map", "mAP"),
     ]
-    if any(history.get(key) for key, _ in metric_keys):
+    if any(any(value == value for value in history.get(key, [])) for key, _ in metric_keys):
         fig, ax = plt.subplots(figsize=(7, 4))
         for key, label in metric_keys:
             values = history.get(key, [])
-            if values:
+            if values and any(value == value for value in values):
                 ax.plot(epochs[: len(values)], values, label=label)
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Score")
@@ -1824,6 +1957,7 @@ def save_checkpoint(
     monitor_mode: str,
     best_val_loss: float,
     best_f1: float,
+    best_map: float,
     epochs_without_improve: int,
     dataset_info: DatasetInfo,
     history: Dict[str, List[float]],
@@ -1840,6 +1974,7 @@ def save_checkpoint(
         "best_monitor_metric": monitor_metric,
         "best_monitor_mode": monitor_mode,
         "best_f1": best_f1,
+        "best_map": best_map,
         "best_val_loss": best_val_loss,
         "epochs_without_improve": epochs_without_improve,
         "category_id_to_label": dataset_info.category_id_to_label,
@@ -2395,6 +2530,7 @@ def main() -> None:
 
     scaler = torch.cuda.amp.GradScaler(enabled=args.amp and device.type == "cuda")
     best_f1 = 0.0
+    best_map = 0.0
     best_val_loss = float("inf")
     best_monitor_value = initial_best_monitor_value(monitor_mode)
     epochs_without_improve = 0
@@ -2411,6 +2547,7 @@ def main() -> None:
             checkpoint = load_checkpoint(resume_path, model, optimizer, scheduler)
             start_epoch = checkpoint.get("epoch", 0) + 1
             best_f1 = checkpoint.get("best_f1", checkpoint.get("best_metric", 0.0))
+            best_map = checkpoint.get("best_map", 0.0)
             best_val_loss = checkpoint.get("best_val_loss", float("inf"))
             best_monitor_value = best_monitor_from_checkpoint(
                 checkpoint,
@@ -2515,7 +2652,7 @@ def main() -> None:
                 scheduler.step()
 
         logging.info(
-            "Epoch %d | Train loss %.4f | Val loss %.4f | Val precision %.4f | Val recall %.4f | Val F1 %.4f | Val mIoU %.4f | Val score threshold %.3g | Monitor %s %.4f | LR %s",
+            "Epoch %d | Train loss %.4f | Val loss %.4f | Val precision %.4f | Val recall %.4f | Val F1 %.4f | Val mIoU %.4f | Val mAP %.4f | Val score threshold %.3g | Monitor %s %.4f | LR %s",
             epoch,
             train_loss,
             val_loss,
@@ -2523,6 +2660,7 @@ def main() -> None:
             metrics["recall"],
             metrics["f1"],
             metrics["mean_iou"],
+            metrics["map"],
             metrics.get("score_threshold", args.score_threshold),
             args.monitor_metric,
             monitor_value,
@@ -2551,6 +2689,8 @@ def main() -> None:
             epochs_without_improve += 1
         if metrics["f1"] > best_f1:
             best_f1 = metrics["f1"]
+        if metrics["map"] > best_map:
+            best_map = metrics["map"]
         save_checkpoint(
             output_dir=output_dir,
             model=model,
@@ -2562,6 +2702,7 @@ def main() -> None:
             monitor_mode=monitor_mode,
             best_val_loss=best_val_loss,
             best_f1=best_f1,
+            best_map=best_map,
             epochs_without_improve=epochs_without_improve,
             dataset_info=dataset_info,
             history=history,
@@ -2585,10 +2726,11 @@ def main() -> None:
         logging.info("Epoch %d completed. Time taken: %.2f seconds.", epoch, (datetime.now() - start_time).total_seconds())
 
     logging.info(
-        "Training complete. Best %s: %.4f | Best F1: %.4f | Best val loss: %.4f",
+        "Training complete. Best %s: %.4f | Best F1: %.4f | Best mAP: %.4f | Best val loss: %.4f",
         args.monitor_metric,
         best_monitor_value,
         best_f1,
+        best_map,
         best_val_loss,
     )
 
