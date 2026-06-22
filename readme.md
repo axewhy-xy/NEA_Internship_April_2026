@@ -20,7 +20,7 @@ The outcome of the project would be a labelled dataset with structural and archi
 13. [ ] - Evaluate the performance of the trained model on a validation set and make adjustments as necessary to improve its performance.
 14. [ ] - Test the trained model on a test set to assess its performance on unseen data and ensure that it can generalize well to new images of HDB buildings.
 15. [ ] - Document the entire process, including the algorithms/scripts used for data retrieval, augmentation, labelling, and model training, as well as the results and insights gained from the project.
-16. [ ] - Prepare a final report to present the findings of the project, including the performance of the trained model and its potential applications for optimizing Wolbachia-Aedes releases in HDB residential buildings.
+16. [ ] - Explore the possibility of deploying the trained model as a web application or API that can be used by other researchers or practitioners to automatically label new images of HDB buildings with the predefined features, which would help to optimize the Wolbachia-Aedes releases in HDB residential buildings.
 
 ## Completed Tasks:
 1. Set up environment for Google Earth Engine API for satellite imagery
