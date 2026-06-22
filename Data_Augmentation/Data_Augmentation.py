@@ -132,6 +132,7 @@ def parse_arguments():
     parser.add_argument("--num_augs_per_image", type=int, default=DEFAULT_NUM_AUGS_PER_IMAGE, help="Number of augmentations to generate per image")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Global random seed used to deterministically generate each sample")
     parser.add_argument("--overwrite", action="store_true", help="Whether to overwrite existing augmented images and metadata")
+    parser.add_argument("--use_single_dir", action="store_true", default=False, help="Whether to save all augmented images in a single directory instead of class-based subdirectories")
 
     # Augmentation parameters
     parser.add_argument("--rotation_angles", type=int, nargs="+", default=DEFAULT_ROTATION_ANGLES, help="List of angles for rotation augmentation")
@@ -1047,8 +1048,15 @@ def run():
     output_dir = resolve_path(args.output_dir, PROJECT_ROOT)
     output_image_dir = output_dir / "images"
     output_metadata_path = output_dir / args.output_metadata
-    train_dir, valid_dir, test_dir = ensure_output_dirs(output_image_dir)
-    split_dirs = {"train": train_dir, "valid": valid_dir, "test": test_dir}
+    
+    if args.use_single_dir:
+        output_image_dir = output_dir / "augmented_images"
+        output_image_dir.mkdir(parents=True, exist_ok=True)
+        split_dirs = {"train": output_image_dir, "valid": output_image_dir
+                      , "test": output_image_dir}
+    else:
+        train_dir, valid_dir, test_dir = ensure_output_dirs(output_image_dir)
+        split_dirs = {"train": train_dir, "valid": valid_dir, "test": test_dir}
 
     unknown_split_dir = output_image_dir / "unknown"
     unknown_split_dir.mkdir(parents=True, exist_ok=True)
