@@ -1328,9 +1328,45 @@ def create_training_history() -> Dict[str, List[float]]:
         history[key] = []
     return history
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# copy_training_history()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper creates a copy of the training history dictionary, ensuring that the lists of values for
+the epochs and metrics are also copied. This is useful for preserving the original training history
+when making modifications or normalizations to the history data.
+
+Args:
+- history (Dict[str, List[float]]): The training history dictionary to be copied.
+
+Returns:
+- Dict[str, List[float]]: A new dictionary containing copies of the lists of epochs and metrics from the original history.
+
+"""
 def copy_training_history(history: Dict[str, List[float]]) -> Dict[str, List[float]]:
     return {key: list(values) for key, values in history.items()}
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# normalize_training_history()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper normalizes the training history dictionary to ensure that all values are numeric and that 
+the lengths of the lists for epochs and metrics are consistent. It converts all values to floats, and
+for the "epochs" key, it converts values to integers. If the lengths of the metric lists do not match
+the length of the "epochs" list, it pads the metric lists with NaN values to ensure consistency.
+The function also allows for filtering the history to only include epochs up to a specified maximum epoch.
+
+Args:
+- raw_history (Any): The raw training history data to be normalized, which may not be in the expected format.
+- max_epoch (Optional[int]): An optional maximum epoch value to filter the history. If provided, only epochs
+    up to this value will be included in the normalized history.
+
+Returns:
+- Dict[str, List[float]]: A normalized training history dictionary with consistent lengths for epochs and metrics, and numeric values.
+
+"""
 def normalize_training_history(
     raw_history,
     max_epoch: Optional[int] = None,
@@ -1377,6 +1413,29 @@ def normalize_training_history(
 
     return history
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# append_training_history()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper appends a new epoch's training and validation metrics to the existing training history 
+dictionary. It ensures that the history remains consistent by truncating any existing entries for the 
+same or later epochs before appending the new values. The function also ensures that all metric lists 
+have the same length as the epochs list.
+
+Args:
+- history (Dict[str, List[float]]): The existing training history dictionary to which new
+    epoch metrics will be appended.
+- epoch (int): The current epoch number being appended to the history.
+- train_loss (float): The training loss for the current epoch.
+- val_loss (float): The validation loss for the current epoch.
+- metrics (Dict[str, float]): A dictionary containing the validation metrics for the current epoch,
+    including "precision", "recall", "f1", "mean_iou", and "map".
+
+Returns:
+- None: The function modifies the history dictionary in place and does not return any value.
+
+"""
 def append_training_history(
     history: Dict[str, List[float]],
     epoch: int,
@@ -1413,6 +1472,27 @@ def append_training_history(
     history["mean_iou"].append(float(metrics["mean_iou"]))
     history["map"].append(float(metrics["map"]))
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# load_training_history_from_log()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper loads training history from a log file, parsing the log lines to extract epoch numbers,
+training loss, validation loss, and validation metrics. It uses a regular expression to match the
+expected log format and populates a training history dictionary with the extracted values. The function
+also allows for filtering the history to only include epochs up to a specified maximum epoch.
+
+Args:
+- log_path (Path): The path to the log file from which to load the training history.
+- max_epoch (Optional[int]): An optional maximum epoch value to filter the history. If provided, only epochs
+    up to this value will be included in the loaded history.
+
+Returns:
+- Dict[str, List[float]]: A dictionary containing the loaded training history, including lists of epochs,
+    training loss, validation loss, and validation metrics. If the log file does not exist or cannot be
+    read, an empty history dictionary is returned.
+
+"""
 def load_training_history_from_log(
     log_path: Path,
     max_epoch: Optional[int] = None,
@@ -1456,6 +1536,30 @@ def load_training_history_from_log(
 
     return history
 
+"""
+# ----------------------------------------------------------------------------------------------------
+# restore_training_history()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper restores the training history from a checkpoint or log file. It first attempts to retrieve
+the history from the checkpoint, and if that fails, it tries to load it from a log file. If both attempts
+fail, it returns an empty training history. The function also allows for filtering the history to only
+include epochs up to a specified maximum epoch.
+
+Args:
+- checkpoint (Dict): The loaded checkpoint dictionary from which to restore the training history.
+- resume_path (Path): The path to the checkpoint file, used to locate the corresponding log file.
+- output_dir (Path): The directory where the log file may be located, used as a fallback if the log
+    file is not found in the checkpoint's directory.
+- max_epoch (int): The maximum epoch value to filter the restored history. Only epochs up to this value
+    will be included in the restored history.
+
+Returns:
+- Tuple[Dict[str, List[float]], str]: A tuple containing the restored training history dictionary and
+    the path to the source of the restored history (either "checkpoint" or the log file path). If no
+    history could be restored, an empty history dictionary and an empty string are returned.
+
+"""
 def restore_training_history(
     checkpoint: Dict,
     resume_path: Path,
