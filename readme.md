@@ -2,7 +2,7 @@
 Project Description: This study aims to identify HDB structures and estimate their impact on the wild-type mosquito population size and the efficacy of Wolbachia-Aedes releases.
 
 ## Project Outcome:
-The outcome of the project would be a labelled dataset with structural and architectural features relevant to mosquito activity. The dataset is to be extracted using image processing and computer vision, validated for accuracy and cleaned for fitting causal machine learning model. Utimately, the end goal of the project will be a custom ml-assisted labelling system/model that can be used to automatically label new images of HDB buildings with the predefined features, which would help to optimize the Wolbachia-Aedes releases in HDB residential buildings.
+The outcome of the project would be a labelled dataset with structural and architectural features relevant to mosquito activity. The dataset is to be extracted using image processing and computer vision, validated for accuracy and cleaned for fitting causal machine learning model. Utimately, the end goal of the project will be a custom ml-assisted labelling system/model that can be used to automatically label new images of HDB buildings with the predefined features, which  could be then fitted into a cnn machine learning model. 
 
 ## Planned Tasked/TODO:
 1. [X] - Set up environment for Google Earth Engine API for satellite imagery
