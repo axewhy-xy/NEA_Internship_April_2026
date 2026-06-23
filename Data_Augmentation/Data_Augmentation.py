@@ -1046,11 +1046,10 @@ def run():
 
     input_metadata_path = resolve_path(args.input_dir, PROJECT_ROOT)
     output_dir = resolve_path(args.output_dir, PROJECT_ROOT)
-    output_image_dir = output_dir / "images"
+    output_image_dir = output_dir / "augmented_images"
     output_metadata_path = output_dir / args.output_metadata
     
     if args.use_single_dir:
-        output_image_dir = output_dir / "augmented_images"
         output_image_dir.mkdir(parents=True, exist_ok=True)
         split_dirs = {"train": output_image_dir, "valid": output_image_dir
                       , "test": output_image_dir}
