@@ -55,6 +55,7 @@ import json
 import logging
 import os
 import random
+import tempfile
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -2085,11 +2086,26 @@ def save_checkpoint(
         "label_to_name": dataset_info.label_to_name,
         "training_history": copy_training_history(history),
     }
+
+    def atomic_torch_save(path: Path) -> None:
+        fd, temp_name = tempfile.mkstemp(dir=output_dir, prefix=f"{path.stem}.", suffix=".tmp")
+        os.close(fd)
+        temp_path = Path(temp_name)
+        try:
+            torch.save(state, temp_path)
+            os.replace(temp_path, path)
+        finally:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+
     last_path = output_dir / "model_last.pth"
-    torch.save(state, last_path)
+    atomic_torch_save(last_path)
     if is_best:
         best_path = output_dir / "model_best.pth"
-        torch.save(state, best_path)
+        atomic_torch_save(best_path)
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -2120,7 +2136,30 @@ def load_checkpoint(
     optimizer: Optional[torch.optim.Optimizer] = None,
     scheduler = None,
 ) -> Dict:
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    candidate_paths = [checkpoint_path]
+    if checkpoint_path.name == "model_best.pth":
+        fallback_path = checkpoint_path.with_name("model_last.pth")
+        if fallback_path.exists() and fallback_path != checkpoint_path:
+            candidate_paths.append(fallback_path)
+
+    last_error: Optional[Exception] = None
+    checkpoint = None
+    loaded_path = checkpoint_path
+    for candidate_path in candidate_paths:
+        try:
+            checkpoint = torch.load(candidate_path, map_location="cpu")
+            loaded_path = candidate_path
+            break
+        except (RuntimeError, OSError, EOFError, ValueError) as exc:
+            last_error = exc
+            logging.warning("Failed to load checkpoint %s: %s", candidate_path, exc)
+
+    if checkpoint is None:
+        raise RuntimeError(f"Unable to load checkpoint from {checkpoint_path}") from last_error
+
+    if loaded_path != checkpoint_path:
+        logging.warning("Resumed from fallback checkpoint %s instead of %s", loaded_path, checkpoint_path)
+
     if "model_state" in checkpoint:
         model.load_state_dict(checkpoint["model_state"])
     else:
