@@ -442,6 +442,32 @@ def collate_coco_json(result_files, file_name_mode, sort_images, relative_root):
 
 '''
 # ----------------------------------------------------------------------------------------------------
+# count_annotations_per_category()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function counts the number of annotations for each category in the provided annotations list. It
+initializes a dictionary to hold the counts for each category ID and iterates through the annotations 
+to increment the counts based on the category IDs. The function returns a dictionary mapping category 
+IDs to their respective annotation counts.
+
+Arguments:
+annotations: A list of annotation dictionaries, each containing a "category_id" field.
+categories: A list of category dictionaries, each containing an "id" field.
+
+Returns:
+A dictionary mapping category IDs to the count of annotations associated with each category.
+
+'''
+def count_annotations_per_category(annotations, categories):
+	category_counts = {category['id']: 0 for category in categories}
+	for annotation in annotations:
+		category_id = annotation.get('category_id')
+		if category_id in category_counts:
+			category_counts[category_id] += 1
+	return category_counts
+
+'''
+# ----------------------------------------------------------------------------------------------------
 # parse_args()
 # ----------------------------------------------------------------------------------------------------
 Description:
@@ -494,7 +520,20 @@ def parse_args():
 		action="store_false",
 		help="Preserve input ordering instead of sorting images by file name.",
 	)
+	parser.add_argument(
+		"--count-per-category",
+		dest="count_per_category",
+		action="store_true",
+		help="Print the number of annotations for each category in the collated dataset.",
+	)
+	parser.add_argument(
+		"--no-count-per-category",
+		dest="count_per_category",
+		action="store_false",
+		help="Do not print per-category annotation counts.",
+	)
 	parser.set_defaults(sort_images=True)
+	parser.set_defaults(count_per_category=False)
 	return parser.parse_args()
 
 '''
@@ -558,6 +597,17 @@ def main():
 		f"Annotations: {len(output['annotations'])} | "
 		f"Categories: {len(output['categories'])}"
 	)
+	if args.count_per_category:
+		category_counts = count_annotations_per_category(
+			output.get("annotations", []), output.get("categories", [])
+		)
+		category_names = {
+			category.get("id"): category.get("name", f"Category {category.get('id')}")
+			for category in output.get("categories", [])
+		}
+		print("Annotation counts by category:")
+		for category_id in sorted(category_counts):
+			print(f"  {category_names.get(category_id, category_id)}: {category_counts[category_id]}")
 	if total_images and resolved_images != total_images:
 		print(
 			"Warning: "
