@@ -1761,6 +1761,145 @@ Returns:
 - None (the function generates and saves visualized images but does not return any value)
 
 """
+"""
+# ----------------------------------------------------------------------------------------------------
+# predictions_to_coco_json()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper function assembles a list of per-image prediction records into a single COCO-style JSON
+structure containing "images", "annotations", and "categories" sections. Each entry in image_records
+describes one image (its resolved id, width, height, and file name) together with the filtered/NMS'd
+boxes, scores, and labels predicted for that image. Bounding boxes are expected in [x1, y1, x2, y2]
+(corner) format, which is what the model and apply_nms() produce; they are converted here to COCO's
+[x, y, width, height] format. Predicted "labels" are the model's internal contiguous label indices
+(1..num_classes-1); label_to_name is used to attach a human-readable "name" to each category entry so
+the output remains interpretable even though COCO ground-truth category IDs are not necessarily
+recoverable at inference time (see note in save_coco_predictions()).
+
+Args:
+- image_records (List[Dict]): One entry per image, each a dict with keys:
+    "image_id" (int), "file_name" (str), "width" (int), "height" (int),
+    "boxes" (torch.Tensor[N, 4] in x1y1x2y2), "scores" (torch.Tensor[N]), "labels" (torch.Tensor[N]).
+- label_to_name (Dict[int, str]): Mapping from predicted label index to a human-readable category name.
+
+Returns:
+- Dict: A COCO-style dictionary with "images", "annotations", and "categories" keys, ready to be
+  serialized with json.dump().
+
+"""
+def predictions_to_coco_json(
+    image_records: List[Dict],
+    label_to_name: Dict[int, str],
+) -> Dict:
+    images_section: List[Dict] = []
+    annotations_section: List[Dict] = []
+    annotation_id = 1
+
+    for record in image_records:
+        images_section.append(
+            {
+                "id": record["image_id"],
+                "file_name": record["file_name"],
+                "width": record["width"],
+                "height": record["height"],
+            }
+        )
+
+        boxes = record["boxes"]
+        scores = record["scores"]
+        labels = record["labels"]
+
+        for box, score, label in zip(boxes, scores, labels):
+            x1, y1, x2, y2 = [float(v) for v in box.tolist()]
+            width = max(0.0, x2 - x1)
+            height = max(0.0, y2 - y1)
+            annotations_section.append(
+                {
+                    "id": annotation_id,
+                    "image_id": record["image_id"],
+                    "category_id": int(label),
+                    "bbox": [x1, y1, width, height],
+                    "area": width * height,
+                    "score": float(score),
+                    "iscrowd": 0,
+                }
+            )
+            annotation_id += 1
+
+    categories_section = [
+        {"id": label_id, "name": label_to_name.get(label_id, str(label_id))}
+        for label_id in sorted(label_to_name)
+    ]
+
+    return {
+        "images": images_section,
+        "annotations": annotations_section,
+        "categories": categories_section,
+    }
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# save_coco_predictions()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function serializes a COCO-style predictions dictionary (as produced by predictions_to_coco_json())
+to a JSON file at the given path, creating parent directories as needed.
+
+Note on category_id: predicted "category_id" values in the output are the model's internal contiguous
+label indices (1..num_classes-1) used during training, NOT necessarily the original dataset's COCO
+category IDs. When predictions are generated against a labeled split (visualize_predictions()), these
+indices match the label indices assigned via DatasetInfo.category_id_to_label for that dataset, so they
+are consistent with the dataset's own category numbering. When predictions are generated in deployment
+mode (run_deploy_inference()) on unlabeled images, there is no ground-truth dataset to cross-reference,
+so the same label indices are used as-is; the accompanying "categories" section always lists the
+human-readable name for every label so results remain interpretable regardless.
+
+Args:
+- coco_predictions (Dict): The COCO-style dictionary to save, as returned by predictions_to_coco_json().
+- output_path (Path): The file path to write the JSON file to.
+
+Returns:
+- None
+
+"""
+def save_coco_predictions(coco_predictions: Dict, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as file:
+        json.dump(coco_predictions, file, indent=2)
+    logging.info("Saved COCO-style predictions JSON to %s", output_path)
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# visualize_predictions()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function generates predictions and saves them according to the requested output_format. In "image"
+mode (the default), it behaves as before: it draws bounding boxes and labels on the original images using
+OpenCV and saves the annotated images to output_dir. In "coco_json" mode, it additionally accumulates all
+filtered/NMS'd predictions across the data loader and writes them out as a single COCO-style JSON file
+(images/annotations/categories) at the end, via predictions_to_coco_json() and save_coco_predictions().
+"both" performs image annotation and JSON export together, which is useful for visually sanity-checking
+that the boxes/labels captured in the JSON are correct. If OpenCV is not installed and image output was
+requested, the function raises a RuntimeError indicating that OpenCV is required for prediction visualization.
+
+Args:
+- model (nn.Module): The trained model to use for generating predictions.
+- data_loader (DataLoader): The DataLoader providing the dataset to visualize.
+- dataset (CocoDetectionDataset): The dataset object, used to resolve image paths for visualization.
+- device (torch.device): The device on which to run the model for generating predictions (e.g., torch.device('cuda') or
+    torch.device('cpu')).
+- output_dir (Path): The directory where the visualized images (and/or the COCO JSON file) should be saved.
+- score_threshold (float): The minimum confidence score required for a prediction to be visualized.
+- nms_iou_threshold (float): The IoU threshold to use for non-maximum suppression when filtering predictions.
+- label_to_name (Dict[int, str]): A mapping from label indices to human-readable category names for labeling the visualizations.
+- output_format (str): One of "image", "coco_json", or "both". Determines whether annotated images, a COCO-style
+    JSON predictions file, or both are saved. Defaults to "image" to preserve prior behavior.
+- coco_json_filename (str): File name (relative to output_dir) to use when writing the COCO-style JSON file.
+
+Returns:
+- None (the function generates and saves visualized images and/or a COCO JSON file but does not return any value)
+
+"""
 def visualize_predictions(
     model: nn.Module,
     data_loader: DataLoader,
@@ -1770,13 +1909,22 @@ def visualize_predictions(
     score_threshold: float,
     nms_iou_threshold: float,
     label_to_name: Dict[int, str],
+    output_format: str = "image",
+    coco_json_filename: str = "predictions_coco.json",
 ) -> None:
-    try:
-        import cv2
-    except ImportError as exc:
-        raise RuntimeError("OpenCV (cv2) is required for prediction visualization.") from exc
+    save_images = output_format in ("image", "both")
+    save_json = output_format in ("coco_json", "both")
+
+    cv2 = None
+    if save_images:
+        try:
+            import cv2
+        except ImportError as exc:
+            raise RuntimeError("OpenCV (cv2) is required for prediction visualization.") from exc
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    coco_image_records: List[Dict] = []
+
     model.eval()
     with torch.no_grad():
         for images, targets in data_loader:
@@ -1789,11 +1937,6 @@ def visualize_predictions(
                 image_path = dataset.get_image_path(image_id)
                 if image_path is None:
                     logging.warning("Missing image path for image_id=%s; skipping visualization.", image_id)
-                    continue
-
-                image = cv2.imread(str(image_path))
-                if image is None:
-                    logging.warning("Failed to read image %s; skipping.", image_path)
                     continue
 
                 boxes = output["boxes"].detach().cpu()
@@ -1811,6 +1954,29 @@ def visualize_predictions(
                     labels,
                     nms_iou_threshold,
                 )
+
+                if save_json:
+                    with Image.open(image_path) as pil_image:
+                        width, height = pil_image.size
+                    coco_image_records.append(
+                        {
+                            "image_id": image_id,
+                            "file_name": image_path.name,
+                            "width": width,
+                            "height": height,
+                            "boxes": boxes,
+                            "scores": scores,
+                            "labels": labels,
+                        }
+                    )
+
+                if not save_images:
+                    continue
+
+                image = cv2.imread(str(image_path))
+                if image is None:
+                    logging.warning("Failed to read image %s; skipping.", image_path)
+                    continue
 
                 for box, score, label in zip(boxes, scores, labels):
                     x1, y1, x2, y2 = box.tolist()
@@ -1854,7 +2020,12 @@ def visualize_predictions(
                 output_path = output_dir / output_name
                 cv2.imwrite(str(output_path), image)
 
-    logging.info("Saved test prediction visualizations to %s", output_dir)
+    if save_images:
+        logging.info("Saved test prediction visualizations to %s", output_dir)
+
+    if save_json:
+        coco_predictions = predictions_to_coco_json(coco_image_records, label_to_name)
+        save_coco_predictions(coco_predictions, output_dir / coco_json_filename)
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -1875,6 +2046,13 @@ Args:
 - label_to_name (Dict[int, str]): Mapping from label indices to names.
 - batch_size (int): Batch size for inference.
 - use_amp (bool): Whether to use automatic mixed precision for inference.
+- output_format (str): One of "image", "coco_json", or "both". "image" (default) preserves prior
+    behavior of saving annotated images only. "coco_json" additionally accumulates predictions across
+    all images and writes a single COCO-style JSON file (images/annotations/categories) to output_dir
+    once inference completes. "both" saves annotated images and the JSON file together. Since this
+    directory of images is unlabeled, sequential integer image IDs are assigned in the order images are
+    discovered (sorted by path) rather than reusing any dataset image_id.
+- coco_json_filename (str): File name (relative to output_dir) to use when writing the COCO-style JSON file.
 
 Returns:
 - None
@@ -1890,11 +2068,18 @@ def run_deploy_inference(
     label_to_name: Dict[int, str],
     batch_size: int,
     use_amp: bool,
+    output_format: str = "image",
+    coco_json_filename: str = "predictions_coco.json",
 ) -> None:
-    try:
-        import cv2
-    except ImportError as exc:
-        raise RuntimeError("OpenCV (cv2) is required for deployment visualization.") from exc
+    save_images = output_format in ("image", "both")
+    save_json = output_format in ("coco_json", "both")
+
+    cv2 = None
+    if save_images:
+        try:
+            import cv2
+        except ImportError as exc:
+            raise RuntimeError("OpenCV (cv2) is required for deployment visualization.") from exc
 
     images_dir = images_dir.resolve()
     output_dir = output_dir.resolve()
@@ -1921,6 +2106,11 @@ def run_deploy_inference(
     model.eval()
     amp_enabled = use_amp and device.type == "cuda"
 
+    # Unlabeled deploy images have no dataset image_id, so assign one deterministically
+    # based on each image's position in the sorted file list.
+    image_id_by_path: Dict[Path, int] = {path: idx for idx, path in enumerate(image_paths)}
+    coco_image_records: List[Dict] = []
+
     def iter_batches(items: List[Path], size: int):
         step = max(1, size)
         for i in range(0, len(items), step):
@@ -1944,12 +2134,7 @@ def run_deploy_inference(
             with autocast_context(device, amp_enabled):
                 outputs = model(images)
 
-            for (image_path, _), output in zip(batch_items, outputs):
-                image = cv2.imread(str(image_path))
-                if image is None:
-                    logging.warning("Failed to read image %s; skipping.", image_path)
-                    continue
-
+            for (image_path, image_tensor), output in zip(batch_items, outputs):
                 boxes = output["boxes"].detach().cpu()
                 scores = output["scores"].detach().cpu()
                 labels = output["labels"].detach().cpu()
@@ -1965,6 +2150,28 @@ def run_deploy_inference(
                     labels,
                     nms_iou_threshold,
                 )
+
+                if save_json:
+                    _, tensor_height, tensor_width = image_tensor.shape
+                    coco_image_records.append(
+                        {
+                            "image_id": image_id_by_path[image_path],
+                            "file_name": str(image_path.relative_to(images_dir)),
+                            "width": tensor_width,
+                            "height": tensor_height,
+                            "boxes": boxes,
+                            "scores": scores,
+                            "labels": labels,
+                        }
+                    )
+
+                if not save_images:
+                    continue
+
+                image = cv2.imread(str(image_path))
+                if image is None:
+                    logging.warning("Failed to read image %s; skipping.", image_path)
+                    continue
 
                 for box, score, label in zip(boxes, scores, labels):
                     x1, y1, x2, y2 = box.tolist()
@@ -2013,7 +2220,12 @@ def run_deploy_inference(
                 if not cv2.imwrite(str(output_path), image):
                     logging.warning("Failed to write deploy output %s", output_path)
 
-    logging.info("Saved deploy predictions to %s", output_dir)
+    if save_images:
+        logging.info("Saved deploy predictions to %s", output_dir)
+
+    if save_json:
+        coco_predictions = predictions_to_coco_json(coco_image_records, label_to_name)
+        save_coco_predictions(coco_predictions, output_dir / coco_json_filename)
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -2457,6 +2669,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-every", type=int, default=0, help="Save checkpoint every N epochs.")
     parser.add_argument("--test-deploy", type=str, default="", help="Directory of unlabeled images for deployment inference. If set, training and test evaluation are skipped.")
     parser.add_argument("--deploy-output", type=str, default="", help="Output directory for deployment predictions (default: <output_root>/<run_name>/deploy_predictions).")
+    parser.add_argument(
+        "--output-format",
+        type=str,
+        default="image",
+        choices=["image", "coco_json", "both"],
+        help="Format for saved predictions: 'image' saves annotated images (default), 'coco_json' saves "
+        "a COCO-style predictions JSON file, and 'both' saves annotated images alongside the JSON file "
+        "so boxes/labels can be visually verified.",
+    )
 
     args = parser.parse_args()
     if args.early_stop_patience < 0:
@@ -2593,6 +2814,7 @@ def main() -> None:
                 label_to_name=label_to_name,
                 batch_size=args.batch_size,
                 use_amp=args.amp,
+                output_format=args.output_format,
             )
         except (RuntimeError, ValueError) as exc:
             logging.error("%s", exc)
@@ -2739,6 +2961,7 @@ def main() -> None:
             score_threshold=args.score_threshold,
             nms_iou_threshold=args.nms_iou_threshold,
             label_to_name=dataset_info.label_to_name,
+            output_format=args.output_format,
         )
         return
 
@@ -2906,6 +3129,7 @@ def main() -> None:
         score_threshold=args.score_threshold,
         nms_iou_threshold=args.nms_iou_threshold,
         label_to_name=dataset_info.label_to_name,
+        output_format=args.output_format,
     )
 
 # Main Entry Point
