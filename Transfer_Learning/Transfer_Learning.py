@@ -46,6 +46,9 @@ Dependent Libraries:
 - matplotlib (optional, for plotting)
 - OpenCV (optional, for visualization)
 
+Useful Links:
+https://community.labelstud.io/t/troubleshooting-image-loading-issue-in-label-studio-with-local-storage-paths/181
+
 """
 
 from __future__ import annotations
