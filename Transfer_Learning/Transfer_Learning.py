@@ -49,6 +49,22 @@ Dependent Libraries:
 Useful Links:
 https://community.labelstud.io/t/troubleshooting-image-loading-issue-in-label-studio-with-local-storage-paths/181
 
+To edit COCO JSON annotations:
+set LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+set LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=C:\User\YOLO\dataset\ <--- the path to the root directory containing the images
+label-studio start
+Modify JSON annotations (label-studio-converter's output):
+[
+  {
+    "data": {
+      "image": "/data/local-files/?d=train/images/004811b6-Cam_3340.jpg"
+    },
+    ...
+  }
+]
+In Label-Studio Web UI, Settings > Cloud Storage, add new local storage with the 
+“Local path” field set to C:\User\YOLO\dataset\train\images <--- or any path to the directory containing the images.
+
 """
 
 from __future__ import annotations
