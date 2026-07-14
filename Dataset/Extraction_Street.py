@@ -872,7 +872,7 @@ def export_split(
 
 		safe_id = sanitize_filename(sample_id)
 		for heading in headings:
-			file_name = f"{safe_id}_{postal_code}_{split_name}_h{heading}_p{pitch}_f{fov}.jpg"
+			file_name = f"{safe_id}_{split_name}_h{heading}_p{pitch}_f{fov}_{postal_code}.jpg"
 			out_path = split_dir / file_name
 
 			try:

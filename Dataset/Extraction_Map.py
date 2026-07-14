@@ -1063,7 +1063,7 @@ def export_split(
 		for zoom in zoom_levels:
 			tile_x, tile_y = lat_lon_to_tile_xy(lat, lon, zoom)
 			extension = tile_client.file_extension()
-			file_name = f"{safe_id}_{postal_code}_{split_name}_z{zoom}_x{tile_x}_y{tile_y}.{extension}"
+			file_name = f"{safe_id}_{split_name}_z{zoom}_x{tile_x}_y{tile_y}_{postal_code}.{extension}"
 			out_path = split_dir / file_name
 
 			row_data = {
