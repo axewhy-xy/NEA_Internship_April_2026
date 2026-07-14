@@ -41,3 +41,9 @@ logs
 *.h5
 *.pt
 *.tar
+
+#Data files
+*.csv
+*.tsv
+*.json
+*.xml
