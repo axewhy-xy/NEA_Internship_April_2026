@@ -51,7 +51,8 @@ https://community.labelstud.io/t/troubleshooting-image-loading-issue-in-label-st
 
 To Enable Label Studio to Load Images from Local Storage:
 set LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
-set LABEL_STUDIO_LOCAL_FILES_SERVING_ROOT= (path to image directory's root)
+set LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=(path to image directory's root)
+label-studio start
 
 """
 
