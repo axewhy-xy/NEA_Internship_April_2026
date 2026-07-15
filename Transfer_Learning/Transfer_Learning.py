@@ -49,6 +49,10 @@ Dependent Libraries:
 Useful Links:
 https://community.labelstud.io/t/troubleshooting-image-loading-issue-in-label-studio-with-local-storage-paths/181
 
+To Enable Label Studio to Load Images from Local Storage:
+set LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+set LABEL_STUDIO_LOCAL_FILES_SERVING_ROOT= (path to image directory's root)
+
 """
 
 from __future__ import annotations
