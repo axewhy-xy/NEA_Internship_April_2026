@@ -876,9 +876,14 @@ Args:
 - pred_scores (torch.Tensor): A tensor containing the confidence scores for the predicted bounding boxes.
 - iou_threshold (float): The Intersection over Union (IoU) threshold used to determine whether a predicted
     bounding box matches a ground truth bounding box.
+- counts_by_class (Optional[Dict[int, Dict[str, float]]]): An optional dictionary mapping class label to its
+    own counts dictionary (same shape as `counts`). When provided, this function also accumulates per-class
+    true positives, false positives, false negatives, and IoU sums, in addition to the overall `counts`.
+    Missing labels are created on demand via `empty_metric_counts()`.
 
 Returns:
-- None: The function updates the counts dictionary in place and does not return any value.
+- None: The function updates the counts dictionary (and counts_by_class, if provided) in place and does
+    not return any value.
 
 """
 def add_detection_matches(
@@ -889,6 +894,7 @@ def add_detection_matches(
     pred_labels: torch.Tensor,
     pred_scores: torch.Tensor,
     iou_threshold: float,
+    counts_by_class: Optional[Dict[int, Dict[str, float]]] = None,
 ) -> None:
     label_set = set(gt_labels.tolist()) | set(pred_labels.tolist())
     for label in label_set:
@@ -898,13 +904,22 @@ def add_detection_matches(
         pred = pred_boxes[pred_mask]
         pred_score_label = pred_scores[pred_mask]
 
+        class_counts = None
+        if counts_by_class is not None:
+            label_id = int(label)
+            class_counts = counts_by_class.setdefault(label_id, empty_metric_counts())
+
         if len(gt) == 0 and len(pred) == 0:
             continue
         if len(gt) == 0:
             counts["fp"] += len(pred)
+            if class_counts is not None:
+                class_counts["fp"] += len(pred)
             continue
         if len(pred) == 0:
             counts["fn"] += len(gt)
+            if class_counts is not None:
+                class_counts["fn"] += len(gt)
             continue
 
         order = torch.argsort(pred_score_label, descending=True)
@@ -920,10 +935,18 @@ def add_detection_matches(
                 matched_gt.add(int(gt_idx))
                 counts["sum_iou"] += float(max_iou)
                 counts["match_count"] += 1
+                if class_counts is not None:
+                    class_counts["tp"] += 1
+                    class_counts["sum_iou"] += float(max_iou)
+                    class_counts["match_count"] += 1
             else:
                 counts["fp"] += 1
+                if class_counts is not None:
+                    class_counts["fp"] += 1
 
         counts["fn"] += len(gt) - len(matched_gt)
+        if class_counts is not None:
+            class_counts["fn"] += len(gt) - len(matched_gt)
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -1079,9 +1102,15 @@ Args:
 - score_threshold (float): The minimum confidence score required for a prediction to be considered valid.
 - iou_threshold (float): The IoU threshold for determining true positives when matching predictions to ground truth.
 - nms_iou_threshold (float): The IoU threshold to use for non-maximum suppression to filter out duplicate detections.
+- label_to_name (Optional[Dict[int, str]]): An optional mapping from class label to a human-readable class
+    name. When provided, per-class metrics are also computed (precision, recall, F1, mean IoU, and AP for
+    each class) and returned under the "per_class" key, keyed by class name. Classes with no ground-truth
+    boxes and no predictions in the evaluated split are omitted.
 
 Returns:
-- Dict[str, float]: A dictionary containing the evaluation metrics: precision, recall, F1 score, and mean IoU.
+- Dict[str, float]: A dictionary containing the evaluation metrics: precision, recall, F1 score, and mean IoU,
+    the overall mAP, and, when `label_to_name` is provided, a "per_class" entry mapping each class name to
+    its own dictionary of {"precision", "recall", "f1", "mean_iou", "ap"}.
 
 """
 def evaluate(
@@ -1093,11 +1122,16 @@ def evaluate(
     nms_iou_threshold: float,
     score_thresholds: Optional[Iterable[float]] = None,
     select_metric: Optional[str] = None,
+    label_to_name: Optional[Dict[int, str]] = None,
 ) -> Dict[str, float]:
     model.eval()
     thresholds = normalize_score_thresholds(score_threshold, score_thresholds)
     counts_by_threshold = {
         threshold: empty_metric_counts()
+        for threshold in thresholds
+    }
+    counts_by_class_and_threshold: Dict[float, Dict[int, Dict[str, float]]] = {
+        threshold: {}
         for threshold in thresholds
     }
     gt_boxes_by_class: Dict[int, Dict[int, torch.Tensor]] = defaultdict(dict)
@@ -1157,6 +1191,7 @@ def evaluate(
                         pred_labels,
                         pred_scores,
                         iou_threshold,
+                        counts_by_class=counts_by_class_and_threshold[threshold],
                     )
 
     map_value = mean_average_precision(
@@ -1168,7 +1203,75 @@ def evaluate(
         threshold: {**counts_to_metrics(counts), "map": map_value}
         for threshold, counts in counts_by_threshold.items()
     }
-    return select_metrics_for_monitor(metrics_by_threshold, score_threshold, select_metric)
+    selected_metrics = select_metrics_for_monitor(metrics_by_threshold, score_threshold, select_metric)
+
+    if label_to_name:
+        selected_threshold = selected_metrics.get("score_threshold", score_threshold)
+        per_class_counts = counts_by_class_and_threshold.get(selected_threshold, {})
+        all_label_ids = set(label_to_name.keys()) | set(gt_boxes_by_class.keys()) | set(per_class_counts.keys())
+        per_class_metrics: Dict[str, Dict[str, float]] = {}
+        for label_id in sorted(all_label_ids):
+            has_gt = label_id in gt_boxes_by_class and any(
+                boxes.numel() > 0 for boxes in gt_boxes_by_class[label_id].values()
+            )
+            has_pred = label_id in detections_by_class and len(detections_by_class[label_id]) > 0
+            if not has_gt and not has_pred:
+                continue
+
+            class_counts = per_class_counts.get(label_id, empty_metric_counts())
+            class_metrics = counts_to_metrics(class_counts)
+            class_metrics["ap"] = average_precision_for_class(
+                gt_boxes_by_image=gt_boxes_by_class.get(label_id, {}),
+                detections=detections_by_class.get(label_id, []),
+                iou_threshold=iou_threshold,
+            )
+            class_name = label_to_name.get(label_id, f"class_{label_id}")
+            per_class_metrics[class_name] = class_metrics
+
+        selected_metrics["per_class"] = per_class_metrics
+
+    return selected_metrics
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# log_per_class_metrics()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper logs a per-class breakdown of validation/test metrics (precision, recall, F1, mean IoU, and AP)
+at INFO level, one line per class, sorted alphabetically by class name. It is a thin logging wrapper around
+the "per_class" entry returned by `evaluate()` and is safe to call with None or an empty dictionary, in
+which case it logs nothing.
+
+Args:
+- per_class_metrics (Optional[Dict[str, Dict[str, float]]]): A mapping from class name to a dictionary of
+    that class's metrics, as returned under the "per_class" key of `evaluate()`'s output.
+- epoch (Optional[int]): The current epoch number, included in the log message when provided (e.g. during
+    per-epoch validation). Omitted for one-off test-set evaluations.
+
+Returns:
+- None
+"""
+def log_per_class_metrics(
+    per_class_metrics: Optional[Dict[str, Dict[str, float]]],
+    epoch: Optional[int] = None,
+) -> None:
+    if not per_class_metrics:
+        return
+
+    prefix = f"Epoch {epoch} | " if epoch is not None else ""
+    logging.info("%sPer-class validation metrics:", prefix)
+    for class_name in sorted(per_class_metrics.keys()):
+        class_metrics = per_class_metrics[class_name]
+        logging.info(
+            "%s  Class '%s' | Precision %.4f | Recall %.4f | F1 %.4f | mIoU %.4f | AP %.4f",
+            prefix,
+            class_name,
+            class_metrics.get("precision", 0.0),
+            class_metrics.get("recall", 0.0),
+            class_metrics.get("f1", 0.0),
+            class_metrics.get("mean_iou", 0.0),
+            class_metrics.get("ap", 0.0),
+        )
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -1311,6 +1414,7 @@ def best_monitor_from_checkpoint(
     return initial_best_monitor_value(monitor_mode)
 
 TRAINING_HISTORY_KEYS = ("train_loss", "val_loss", "precision", "recall", "f1", "mean_iou", "map")
+PER_CLASS_HISTORY_KEYS = ("precision", "recall", "f1", "mean_iou", "ap")
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -1318,18 +1422,21 @@ TRAINING_HISTORY_KEYS = ("train_loss", "val_loss", "precision", "recall", "f1", 
 # ----------------------------------------------------------------------------------------------------
 Description:
 This helper creates the in-memory structure used for training plots. The explicit epoch axis allows
-plots to continue with the true epoch numbers after resuming from a checkpoint.
+plots to continue with the true epoch numbers after resuming from a checkpoint. In addition to the overall
+(dataset-wide) metrics, an empty "per_class" dictionary is included; it is populated lazily, keyed by class
+name, the first time per-class validation metrics become available (see `append_per_class_history()`).
 
 Args:
 - None
 
 Returns:
-- Dict[str, List[float]]: Empty plotting history with epoch and metric lists.
+- Dict[str, List[float]]: Empty plotting history with epoch and metric lists, plus an empty "per_class" dict.
 """
 def create_training_history() -> Dict[str, List[float]]:
     history = {"epochs": []}
     for key in TRAINING_HISTORY_KEYS:
         history[key] = []
+    history["per_class"] = {}
     return history
 
 """
@@ -1349,7 +1456,17 @@ Returns:
 
 """
 def copy_training_history(history: Dict[str, List[float]]) -> Dict[str, List[float]]:
-    return {key: list(values) for key, values in history.items()}
+    copied = {}
+    for key, values in history.items():
+        if key == "per_class" and isinstance(values, dict):
+            copied[key] = {
+                class_name: {metric_key: list(metric_values) for metric_key, metric_values in class_history.items()}
+                for class_name, class_history in values.items()
+            }
+        else:
+            copied[key] = list(values)
+    copied.setdefault("per_class", {})
+    return copied
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -1415,6 +1532,58 @@ def normalize_training_history(
             values = history.get(key, [])
             history[key] = [values[index] for index in keep_indices if index < len(values)]
 
+    raw_per_class = raw_history.get("per_class", {})
+    if isinstance(raw_per_class, dict):
+        normalized_per_class: Dict[str, Dict[str, List[float]]] = {}
+        for class_name, class_history in raw_per_class.items():
+            if not isinstance(class_history, dict):
+                continue
+
+            normalized_class_history: Dict[str, List[float]] = {"epochs": []}
+            raw_class_epochs = class_history.get("epochs", [])
+            if isinstance(raw_class_epochs, list):
+                for value in raw_class_epochs:
+                    try:
+                        normalized_class_history["epochs"].append(int(float(value)))
+                    except (TypeError, ValueError):
+                        continue
+
+            for key in PER_CLASS_HISTORY_KEYS:
+                values = class_history.get(key, [])
+                normalized_values = []
+                if isinstance(values, list):
+                    for value in values:
+                        try:
+                            normalized_values.append(float(value))
+                        except (TypeError, ValueError):
+                            normalized_values.append(float("nan"))
+                normalized_class_history[key] = normalized_values
+
+            epoch_count = len(normalized_class_history["epochs"])
+            for key in PER_CLASS_HISTORY_KEYS:
+                values = normalized_class_history.get(key, [])
+                if len(values) < epoch_count:
+                    values = values + [float("nan")] * (epoch_count - len(values))
+                normalized_class_history[key] = values[:epoch_count]
+
+            if max_epoch is not None and normalized_class_history["epochs"]:
+                keep_indices = [
+                    index for index, epoch in enumerate(normalized_class_history["epochs"])
+                    if int(epoch) <= max_epoch
+                ]
+                normalized_class_history["epochs"] = [
+                    normalized_class_history["epochs"][index] for index in keep_indices
+                ]
+                for key in PER_CLASS_HISTORY_KEYS:
+                    values = normalized_class_history.get(key, [])
+                    normalized_class_history[key] = [
+                        values[index] for index in keep_indices if index < len(values)
+                    ]
+
+            normalized_per_class[class_name] = normalized_class_history
+
+        history["per_class"] = normalized_per_class
+
     return history
 
 """
@@ -1478,6 +1647,73 @@ def append_training_history(
 
 """
 # ----------------------------------------------------------------------------------------------------
+# append_per_class_history()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper appends a new epoch's per-class validation metrics to the "per_class" section of the training
+history dictionary. Mirrors the truncate-then-append behaviour of `append_training_history()` so that
+re-running an epoch (e.g. after resuming) correctly overwrites any stale entries for that epoch, and pads
+any class history that fell behind (for example, a class that had no ground truth or predictions in an
+earlier epoch) with NaN so all per-class series stay aligned with their own "epochs" axis.
+
+Args:
+- history (Dict): The existing training history dictionary (as created by `create_training_history()`),
+    whose "per_class" entry will be updated in place.
+- epoch (int): The current epoch number being appended.
+- per_class_metrics (Optional[Dict[str, Dict[str, float]]]): A mapping from class name to that class's
+    metrics dictionary, as returned under the "per_class" key of `evaluate()`'s output. If None or empty,
+    this function does nothing (a class with no ground truth or predictions this epoch simply is not
+    included, and its history for this epoch will be padded with NaN below).
+
+Returns:
+- None: The function modifies the history dictionary in place and does not return any value.
+"""
+def append_per_class_history(
+    history: Dict,
+    epoch: int,
+    per_class_metrics: Optional[Dict[str, Dict[str, float]]],
+) -> None:
+    epoch = int(epoch)
+    per_class_history = history.setdefault("per_class", {})
+
+    class_names = set(per_class_history.keys())
+    if per_class_metrics:
+        class_names |= set(per_class_metrics.keys())
+
+    for class_name in class_names:
+        class_history = per_class_history.setdefault(
+            class_name,
+            {"epochs": [], **{key: [] for key in PER_CLASS_HISTORY_KEYS}},
+        )
+        class_history.setdefault("epochs", [])
+        for key in PER_CLASS_HISTORY_KEYS:
+            class_history.setdefault(key, [])
+
+        cutoff = len(class_history["epochs"])
+        for index, existing_epoch in enumerate(class_history["epochs"]):
+            if int(existing_epoch) >= epoch:
+                cutoff = index
+                break
+
+        if cutoff < len(class_history["epochs"]):
+            class_history["epochs"] = class_history["epochs"][:cutoff]
+            for key in PER_CLASS_HISTORY_KEYS:
+                class_history[key] = class_history[key][:cutoff]
+
+        for key in PER_CLASS_HISTORY_KEYS:
+            if len(class_history[key]) < len(class_history["epochs"]):
+                class_history[key].extend(
+                    [float("nan")] * (len(class_history["epochs"]) - len(class_history[key]))
+                )
+
+        class_metrics = (per_class_metrics or {}).get(class_name)
+        class_history["epochs"].append(epoch)
+        for key in PER_CLASS_HISTORY_KEYS:
+            value = class_metrics.get(key, float("nan")) if class_metrics is not None else float("nan")
+            class_history[key].append(float(value))
+
+"""
+# ----------------------------------------------------------------------------------------------------
 # load_training_history_from_log()
 # ----------------------------------------------------------------------------------------------------
 Description:
@@ -1493,8 +1729,10 @@ Args:
 
 Returns:
 - Dict[str, List[float]]: A dictionary containing the loaded training history, including lists of epochs,
-    training loss, validation loss, and validation metrics. If the log file does not exist or cannot be
-    read, an empty history dictionary is returned.
+    training loss, validation loss, and validation metrics, plus a best-effort "per_class" breakdown parsed
+    from the "Class '<name>' | Precision ... | Recall ... | F1 ... | mIoU ... | AP ..." lines emitted by
+    `log_per_class_metrics()`. If the log file does not exist or cannot be read, an empty history dictionary
+    is returned.
 
 """
 def load_training_history_from_log(
@@ -1515,20 +1753,47 @@ def load_training_history_from_log(
         r"Val mIoU\s+(?P<mean_iou>[-+0-9.eE]+)"
         r"(?:\s+\|\s+Val mAP\s+(?P<map>[-+0-9.eE]+))?"
     )
+    per_class_pattern = re.compile(
+        r"(?:Epoch\s+(?P<epoch>\d+)\s+\|\s+)?"
+        r"\s*Class\s+'(?P<class_name>.+?)'\s+\|\s+"
+        r"Precision\s+(?P<precision>[-+0-9.eE]+)\s+\|\s+"
+        r"Recall\s+(?P<recall>[-+0-9.eE]+)\s+\|\s+"
+        r"F1\s+(?P<f1>[-+0-9.eE]+)\s+\|\s+"
+        r"mIoU\s+(?P<mean_iou>[-+0-9.eE]+)\s+\|\s+"
+        r"AP\s+(?P<ap>[-+0-9.eE]+)"
+    )
     metrics_by_epoch: Dict[int, Dict[str, float]] = {}
+    per_class_by_epoch: Dict[int, Dict[str, Dict[str, float]]] = {}
+    current_epoch: Optional[int] = None
     try:
         with log_path.open("r", encoding="utf-8") as file:
             for line in file:
                 match = metric_pattern.search(line)
-                if match is None:
+                if match is not None:
+                    epoch = int(match.group("epoch"))
+                    current_epoch = epoch
+                    if max_epoch is not None and epoch > max_epoch:
+                        continue
+                    metrics_by_epoch[epoch] = {}
+                    for key in TRAINING_HISTORY_KEYS:
+                        value = match.group(key)
+                        metrics_by_epoch[epoch][key] = float(value) if value is not None else float("nan")
                     continue
-                epoch = int(match.group("epoch"))
-                if max_epoch is not None and epoch > max_epoch:
-                    continue
-                metrics_by_epoch[epoch] = {}
-                for key in TRAINING_HISTORY_KEYS:
-                    value = match.group(key)
-                    metrics_by_epoch[epoch][key] = float(value) if value is not None else float("nan")
+
+                class_match = per_class_pattern.search(line)
+                if class_match is not None:
+                    epoch_group = class_match.group("epoch")
+                    epoch = int(epoch_group) if epoch_group is not None else current_epoch
+                    if epoch is None:
+                        continue
+                    if max_epoch is not None and epoch > max_epoch:
+                        continue
+                    class_name = class_match.group("class_name")
+                    class_metrics = {
+                        key: float(class_match.group(key))
+                        for key in PER_CLASS_HISTORY_KEYS
+                    }
+                    per_class_by_epoch.setdefault(epoch, {})[class_name] = class_metrics
     except OSError as exc:
         logging.warning("Could not read plotting history from %s: %s", log_path, exc)
         return history
@@ -1537,6 +1802,7 @@ def load_training_history_from_log(
         history["epochs"].append(epoch)
         for key in TRAINING_HISTORY_KEYS:
             history[key].append(metrics_by_epoch[epoch][key])
+        append_per_class_history(history, epoch, per_class_by_epoch.get(epoch))
 
     return history
 
@@ -1622,12 +1888,18 @@ loss, and metric values, an output directory to save the plots, and the Matplotl
 The function checks if the necessary data is available in the history and generates the corresponding plots.
 The loss curve plot shows the training and validation loss over epochs, while the metrics curve plot shows
 the precision, recall, F1 score, and mean IoU over epochs. The generated plots are saved as PNG files in the
-specified output directory. If the history does not contain the required data for plotting, the function 
-will simply return without generating any plots.
+specified output directory. If the history also contains a populated "per_class" breakdown (see
+`append_per_class_history()`), two additional kinds of per-class plots are produced: one figure per metric
+(precision, recall, F1, mean IoU, AP) with one curve per class overlaid, saved as
+"metrics_per_class_<metric>.png", and a single combined figure with one subplot per class showing all of
+that class's metrics together, saved as "metrics_per_class_combined.png". If the history does not contain
+the required data for plotting, the function will simply return without generating any plots.
 
 Args:
 - history (Dict[str, List[float]]): A dictionary containing lists of epoch, loss, and metric values.
-  Expected keys include "epochs", "train_loss", "val_loss", "precision", "recall", "f1", and "mean_iou".
+  Expected keys include "epochs", "train_loss", "val_loss", "precision", "recall", "f1", "mean_iou", "map",
+  and optionally "per_class" (a mapping from class name to its own {"epochs", "precision", "recall", "f1",
+  "mean_iou", "ap"} lists).
 - output_dir (Path): The directory where the generated plots should be saved.
 - plt: The Matplotlib pyplot module used for plotting. This should be obtained from the get_plotting_backend() function.
 
@@ -1683,6 +1955,98 @@ def save_training_plots(
         fig.tight_layout()
         fig.savefig(output_dir / "metrics_curve.png", dpi=200)
         plt.close(fig)
+
+    save_per_class_training_plots(history, output_dir, plt)
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# save_per_class_training_plots()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This helper generates and saves per-class validation metrics curves, based on the "per_class" section of
+the training history. For each tracked metric (precision, recall, F1, mean IoU, AP), it produces a single
+figure overlaying every class's curve for that metric, saved as "metrics_per_class_<metric>.png". It also
+produces one combined figure with a small subplot per class (each showing all of that class's metrics
+together), saved as "metrics_per_class_combined.png", so each class effectively has its own validation
+metrics curve alongside the overall metrics already produced by `save_training_plots()`. If no per-class
+history is available, the function returns without generating any plots.
+
+Args:
+- history (Dict): The training history dictionary, expected to contain a "per_class" entry mapping class
+    name to a dictionary of {"epochs", "precision", "recall", "f1", "mean_iou", "ap"} lists.
+- output_dir (Path): The directory where the generated plots should be saved.
+- plt: The Matplotlib pyplot module used for plotting.
+
+Returns:
+- None (the function generates and saves plots but does not return any value)
+"""
+def save_per_class_training_plots(
+    history: Dict,
+    output_dir: Path,
+    plt,
+) -> None:
+    per_class_history = history.get("per_class") or {}
+    class_names = sorted(
+        class_name
+        for class_name, class_history in per_class_history.items()
+        if class_history.get("epochs")
+    )
+    if not class_names:
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    metric_keys = [
+        ("precision", "Precision"),
+        ("recall", "Recall"),
+        ("f1", "F1"),
+        ("mean_iou", "Mean IoU"),
+        ("ap", "AP"),
+    ]
+
+    # One figure per metric, overlaying every class's curve for that metric.
+    for metric_key, metric_label in metric_keys:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        plotted_any = False
+        for class_name in class_names:
+            class_history = per_class_history[class_name]
+            class_epochs = class_history.get("epochs", [])
+            values = class_history.get(metric_key, [])
+            if values and any(value == value for value in values):
+                ax.plot(class_epochs[: len(values)], values, label=class_name)
+                plotted_any = True
+        if not plotted_any:
+            plt.close(fig)
+            continue
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel(metric_label)
+        ax.set_ylim(0.0, 1.0)
+        ax.set_title(f"Per-Class Validation {metric_label}")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize="small")
+        fig.tight_layout()
+        fig.savefig(output_dir / f"metrics_per_class_{metric_key}.png", dpi=200)
+        plt.close(fig)
+
+    # One combined figure with a subplot per class, showing all of that class's metrics together.
+    num_classes = len(class_names)
+    fig, axes = plt.subplots(num_classes, 1, figsize=(7, 3 * num_classes), squeeze=False)
+    for class_index, class_name in enumerate(class_names):
+        ax = axes[class_index][0]
+        class_history = per_class_history[class_name]
+        class_epochs = class_history.get("epochs", [])
+        for metric_key, metric_label in metric_keys:
+            values = class_history.get(metric_key, [])
+            if values and any(value == value for value in values):
+                ax.plot(class_epochs[: len(values)], values, label=metric_label)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Score")
+        ax.set_ylim(0.0, 1.0)
+        ax.set_title(f"Class: {class_name}")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize="small")
+    fig.tight_layout()
+    fig.savefig(output_dir / "metrics_per_class_combined.png", dpi=200)
+    plt.close(fig)
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -2953,8 +3317,10 @@ def main() -> None:
             score_threshold=args.score_threshold,
             iou_threshold=args.iou_threshold,
             nms_iou_threshold=args.nms_iou_threshold,
+            label_to_name=dataset_info.label_to_name,
         )
         logging.info("Test metrics: %s", metrics)
+        log_per_class_metrics(metrics.get("per_class"))
         visualize_predictions(
             model=model,
             data_loader=test_loader,
@@ -3011,6 +3377,7 @@ def main() -> None:
             nms_iou_threshold=args.nms_iou_threshold,
             score_thresholds=val_score_thresholds,
             select_metric=args.monitor_metric,
+            label_to_name=dataset_info.label_to_name,
         )
         monitor_value = get_monitor_value(args.monitor_metric, val_loss, metrics)
 
@@ -3035,8 +3402,10 @@ def main() -> None:
             monitor_value,
             ", ".join(f"{group['lr']:.6g}" for group in optimizer.param_groups),
         )
+        log_per_class_metrics(metrics.get("per_class"), epoch=epoch)
 
         append_training_history(history, epoch, train_loss, val_loss, metrics)
+        append_per_class_history(history, epoch, metrics.get("per_class"))
 
         if plot_backend is not None:
             save_training_plots(history, graphical_dir, plot_backend)
@@ -3121,8 +3490,10 @@ def main() -> None:
         score_threshold=args.score_threshold,
         iou_threshold=args.iou_threshold,
         nms_iou_threshold=args.nms_iou_threshold,
+        label_to_name=dataset_info.label_to_name,
     )
     logging.info("Test metrics: %s", test_metrics)
+    log_per_class_metrics(test_metrics.get("per_class"))
     visualize_predictions(
         model=model,
         data_loader=test_loader,
