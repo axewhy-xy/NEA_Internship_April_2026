@@ -15,6 +15,7 @@ also ensure that the images are correctly associated with their corresponding an
 
 Command Line Usage:
 python SortAndCollateTrainDataSet.py -i <input_directory> -o <output_json_file>
+python SortAndCollateTrainDataSet.py -i <input_directory> -o <output_json_file> --remove-class "Solar Panel"
 """
 
 import argparse
@@ -468,6 +469,65 @@ def count_annotations_per_category(annotations, categories):
 
 '''
 # ----------------------------------------------------------------------------------------------------
+# remove_class_from_coco()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function removes a single class (category) from a COCO-style annotation dataset, given the class
+name. It removes the matching entry from the "categories" list and strips out every annotation in the
+"annotations" list that references that category. Images are left untouched, since an image may still
+have other valid annotations (or may simply become an image with zero annotations, which is valid COCO).
+Category name matching is case-insensitive but otherwise exact, since class names are expected to be
+known ahead of time by the caller.
+
+Arguments:
+data: A dictionary representing a COCO-style dataset, containing "categories" and "annotations" keys.
+class_name: The name of the class/category to remove, as a string.
+
+Returns:
+A tuple of (data, stats):
+	data: The same dictionary passed in, mutated in place with the category and its annotations removed.
+	stats: A dictionary with "removed_category" (the removed category dict, or None if not found) and
+	"removed_annotation_count" (the number of annotations that were removed).
+
+'''
+def remove_class_from_coco(data, class_name):
+	categories = data.get("categories", [])
+	target_name = class_name.strip().lower()
+
+	removed_category = None
+	remaining_categories = []
+	for category in categories:
+		if removed_category is None and str(category.get("name", "")).strip().lower() == target_name:
+			removed_category = category
+			continue
+		remaining_categories.append(category)
+
+	stats = {
+		"removed_category": removed_category,
+		"removed_annotation_count": 0,
+	}
+
+	if removed_category is None:
+		return data, stats
+
+	data["categories"] = remaining_categories
+
+	removed_category_id = removed_category.get("id")
+	remaining_annotations = []
+	for annotation in data.get("annotations", []):
+		if annotation.get("category_id") == removed_category_id:
+			stats["removed_annotation_count"] += 1
+			continue
+		remaining_annotations.append(annotation)
+
+	for new_id, annotation in enumerate(remaining_annotations):
+		annotation["id"] = new_id
+
+	data["annotations"] = remaining_annotations
+	return data, stats
+
+'''
+# ----------------------------------------------------------------------------------------------------
 # parse_args()
 # ----------------------------------------------------------------------------------------------------
 Description:
@@ -532,6 +592,15 @@ def parse_args():
 		action="store_false",
 		help="Do not print per-category annotation counts.",
 	)
+	parser.add_argument(
+		"--remove-class",
+		dest="remove_class",
+		default=None,
+		help=(
+			"Name of a class/category to remove from the output JSON, along with all of "
+			"its annotations (e.g. --remove-class \"Solar Panel\")."
+		),
+	)
 	parser.set_defaults(sort_images=True)
 	parser.set_defaults(count_per_category=False)
 	return parser.parse_args()
@@ -575,6 +644,17 @@ def main():
 	output, stats = collate_coco_json(
 		result_files, args.file_name_mode, args.sort_images, input_dir
 	)
+
+	if args.remove_class:
+		output, remove_stats = remove_class_from_coco(output, args.remove_class)
+		if remove_stats["removed_category"] is None:
+			print(f"Warning: class \"{args.remove_class}\" was not found; nothing removed.")
+		else:
+			removed_name = remove_stats["removed_category"].get("name", args.remove_class)
+			print(
+				f"Removed class \"{removed_name}\" "
+				f"({remove_stats['removed_annotation_count']} annotations removed)."
+			)
 
 	os.makedirs(os.path.dirname(output_json), exist_ok=True)
 	with open(output_json, "w", encoding="utf-8") as handle:
