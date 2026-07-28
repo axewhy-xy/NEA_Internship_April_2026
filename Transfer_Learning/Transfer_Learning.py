@@ -32,6 +32,9 @@ python Transfer_Learning.py --run-name my_experiment --resume path/to/model_best
 To run inference on unlabeled images in a directory:
 python Transfer_Learning.py --run-name my_experiment --resume path/to/model_best.pth --test-deploy path/to/images --deploy-output path/to/output
 
+To export predictions as CSV:
+python Transfer_Learning.py --run-name my_experiment --resume path/to/model_best.pth --test-only --output-format csv
+
 For more options and configurations, use:
 python Transfer_Learning.py --help
 
@@ -63,13 +66,14 @@ import json
 import logging
 import os
 import random
+import sys
 import tempfile
 import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import torch
 from PIL import Image
@@ -2242,14 +2246,93 @@ def save_coco_predictions(coco_predictions: Dict, output_path: Path) -> None:
 
 """
 # ----------------------------------------------------------------------------------------------------
+# load_coco_to_csv_converter()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function attempts to load the COCO_To_CSV/coco_to_csv.py module and returns the coco_to_csv
+function from that module. It first ensures that the project root is in sys.path so that the module 
+can be imported. If the import fails (e.g., if the module or its dependencies are not available), it 
+raises a RuntimeError indicating that the CSV output requires COCO_To_CSV/coco_to_csv.py and its 
+dependencies, including pandas.
+
+Args:
+- None
+
+Returns:
+- Callable[[str, str], None]: The coco_to_csv function from the COCO_To_CSV/coco_to_csv.py module, 
+                              which can be used to convert COCO JSON to CSV format.
+
+"""
+def load_coco_to_csv_converter() -> Callable[[str, str], None]:
+    project_root = Path(__file__).resolve().parent.parent
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+
+    try:
+        from COCO_To_CSV.coco_to_csv import coco_to_csv as converter
+    except ImportError as exc:
+        raise RuntimeError(
+            "CSV output requires COCO_To_CSV/coco_to_csv.py and its dependencies, including pandas."
+        ) from exc
+
+    return converter
+
+"""
+# ----------------------------------------------------------------------------------------------------
+# save_coco_csv_predictions()
+# ----------------------------------------------------------------------------------------------------
+Description:
+This function saves COCO-style predictions to a CSV file by first writing the predictions to a temporary
+JSON file and then converting that JSON to CSV format using the COCO_To_CSV/coco_to_csv.py module. It ensures
+that the output directory exists, and it handles cleanup of the temporary JSON file after conversion. If
+the COCO_To_CSV module or its dependencies are not available, it raises a RuntimeError
+indicating that CSV output requires COCO_To_CSV/coco_to_csv.py and its dependencies, including pandas.
+
+Args:
+- coco_predictions (Dict): The COCO-style dictionary to save, as returned by predictions_to_coco_json().
+- output_path (Path): The file path to write the CSV file to.
+
+Returns:
+- None
+
+"""
+def save_coco_csv_predictions(coco_predictions: Dict, output_path: Path) -> None:
+    converter = load_coco_to_csv_converter()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_json_path: Optional[Path] = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8",
+        ) as temp_json_file:
+            temp_json_path = Path(temp_json_file.name)
+            json.dump(coco_predictions, temp_json_file)
+
+        converter(str(temp_json_path), str(output_path))
+    finally:
+        if temp_json_path is not None:
+            try:
+                temp_json_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logging.warning("Failed to remove temporary COCO JSON file %s: %s", temp_json_path, exc)
+
+    logging.info("Saved CSV predictions to %s", output_path)
+
+"""
+# ----------------------------------------------------------------------------------------------------
 # visualize_predictions()
 # ----------------------------------------------------------------------------------------------------
 Description:
 This function generates predictions and saves them according to the requested output_format. In "image"
 mode (the default), it behaves as before: it draws bounding boxes and labels on the original images using
-OpenCV and saves the annotated images to output_dir. In "coco_json" mode, it additionally accumulates all
-filtered/NMS'd predictions across the data loader and writes them out as a single COCO-style JSON file
-(images/annotations/categories) at the end, via predictions_to_coco_json() and save_coco_predictions().
+OpenCV and saves the annotated images to output_dir. In "coco_json" or "csv" mode, it accumulates all
+filtered/NMS'd predictions across the data loader as a COCO-style prediction structure
+(images/annotations/categories). "coco_json" saves that structure directly, while "csv" converts it
+through COCO_To_CSV/coco_to_csv.py.
 "both" performs image annotation and JSON export together, which is useful for visually sanity-checking
 that the boxes/labels captured in the JSON are correct. If OpenCV is not installed and image output was
 requested, the function raises a RuntimeError indicating that OpenCV is required for prediction visualization.
@@ -2264,9 +2347,10 @@ Args:
 - score_threshold (float): The minimum confidence score required for a prediction to be visualized.
 - nms_iou_threshold (float): The IoU threshold to use for non-maximum suppression when filtering predictions.
 - label_to_name (Dict[int, str]): A mapping from label indices to human-readable category names for labeling the visualizations.
-- output_format (str): One of "image", "coco_json", or "both". Determines whether annotated images, a COCO-style
-    JSON predictions file, or both are saved. Defaults to "image" to preserve prior behavior.
+- output_format (str): One of "image", "coco_json", "csv", or "both". Determines whether annotated images,
+    a COCO-style JSON predictions file, CSV predictions, or image+JSON outputs are saved. Defaults to "image".
 - coco_json_filename (str): File name (relative to output_dir) to use when writing the COCO-style JSON file.
+- csv_filename (str): File name (relative to output_dir) to use when writing the CSV file.
 
 Returns:
 - None (the function generates and saves visualized images and/or a COCO JSON file but does not return any value)
@@ -2283,9 +2367,12 @@ def visualize_predictions(
     label_to_name: Dict[int, str],
     output_format: str = "image",
     coco_json_filename: str = "predictions_coco.json",
+    csv_filename: str = "predictions.csv",
 ) -> None:
     save_images = output_format in ("image", "both")
     save_json = output_format in ("coco_json", "both")
+    save_csv = output_format == "csv"
+    save_coco_export = save_json or save_csv
 
     cv2 = None
     if save_images:
@@ -2327,7 +2414,7 @@ def visualize_predictions(
                     nms_iou_threshold,
                 )
 
-                if save_json:
+                if save_coco_export:
                     with Image.open(image_path) as pil_image:
                         width, height = pil_image.size
                     coco_image_records.append(
@@ -2395,9 +2482,12 @@ def visualize_predictions(
     if save_images:
         logging.info("Saved test prediction visualizations to %s", output_dir)
 
-    if save_json:
+    if save_json or save_csv:
         coco_predictions = predictions_to_coco_json(coco_image_records, label_to_name)
-        save_coco_predictions(coco_predictions, output_dir / coco_json_filename)
+        if save_json:
+            save_coco_predictions(coco_predictions, output_dir / coco_json_filename)
+        if save_csv:
+            save_coco_csv_predictions(coco_predictions, output_dir / csv_filename)
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -2418,13 +2508,15 @@ Args:
 - label_to_name (Dict[int, str]): Mapping from label indices to names.
 - batch_size (int): Batch size for inference.
 - use_amp (bool): Whether to use automatic mixed precision for inference.
-- output_format (str): One of "image", "coco_json", or "both". "image" (default) preserves prior
+- output_format (str): One of "image", "coco_json", "csv", or "both". "image" (default) preserves prior
     behavior of saving annotated images only. "coco_json" additionally accumulates predictions across
     all images and writes a single COCO-style JSON file (images/annotations/categories) to output_dir
-    once inference completes. "both" saves annotated images and the JSON file together. Since this
+    once inference completes. "csv" converts those COCO-style predictions through coco_to_csv(). "both"
+    saves annotated images and the JSON file together. Since this
     directory of images is unlabeled, sequential integer image IDs are assigned in the order images are
     discovered (sorted by path) rather than reusing any dataset image_id.
 - coco_json_filename (str): File name (relative to output_dir) to use when writing the COCO-style JSON file.
+- csv_filename (str): File name (relative to output_dir) to use when writing the CSV file.
 
 Returns:
 - None
@@ -2442,9 +2534,12 @@ def run_deploy_inference(
     use_amp: bool,
     output_format: str = "image",
     coco_json_filename: str = "predictions_coco.json",
+    csv_filename: str = "predictions.csv",
 ) -> None:
     save_images = output_format in ("image", "both")
     save_json = output_format in ("coco_json", "both")
+    save_csv = output_format == "csv"
+    save_coco_export = save_json or save_csv
 
     cv2 = None
     if save_images:
@@ -2523,7 +2618,7 @@ def run_deploy_inference(
                     nms_iou_threshold,
                 )
 
-                if save_json:
+                if save_coco_export:
                     _, tensor_height, tensor_width = image_tensor.shape
                     coco_image_records.append(
                         {
@@ -2595,9 +2690,12 @@ def run_deploy_inference(
     if save_images:
         logging.info("Saved deploy predictions to %s", output_dir)
 
-    if save_json:
+    if save_json or save_csv:
         coco_predictions = predictions_to_coco_json(coco_image_records, label_to_name)
-        save_coco_predictions(coco_predictions, output_dir / coco_json_filename)
+        if save_json:
+            save_coco_predictions(coco_predictions, output_dir / coco_json_filename)
+        if save_csv:
+            save_coco_csv_predictions(coco_predictions, output_dir / csv_filename)
 
 """
 # ----------------------------------------------------------------------------------------------------
@@ -3045,10 +3143,10 @@ def parse_args() -> argparse.Namespace:
         "--output-format",
         type=str,
         default="image",
-        choices=["image", "coco_json", "both"],
+        choices=["image", "coco_json", "csv", "both"],
         help="Format for saved predictions: 'image' saves annotated images (default), 'coco_json' saves "
-        "a COCO-style predictions JSON file, and 'both' saves annotated images alongside the JSON file "
-        "so boxes/labels can be visually verified.",
+        "a COCO-style predictions JSON file, 'csv' saves predictions.csv via COCO_To_CSV/coco_to_csv.py, "
+        "and 'both' saves annotated images alongside the JSON file so boxes/labels can be visually verified.",
     )
 
     args = parser.parse_args()
