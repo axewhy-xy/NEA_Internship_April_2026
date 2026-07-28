@@ -3,7 +3,7 @@ Transfer Learning for object detection on HDB features using satellite imagery a
 
 Author: AxeWhy
 Date: 30/05/2026
-Last Updated: 21/07/2026
+Last Updated: 28/07/2026
 
 Description:
 This script implements transfer learning for object detection on HDB features using satellite imagery
