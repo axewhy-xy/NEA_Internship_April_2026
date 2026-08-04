@@ -3,12 +3,12 @@ Convert COCO JSON annotations to CSV format.
 
 Author: AxeWhy
 Date Created: 2026-07-27
-Last Modified: 2026-07-27
+Last Modified: 2026-08-04
 
 Description:
 This source file contains the implementation of a function that converts COCO JSON annotations to
 csv format. The function reads a COCO JSON file, extracts the file path, xmin, ymin, xmax, ymax, class
-label and postal code for each annotation, and saves the extracted data to a CSV file.
+label, confidence score and postal code for each annotation, and saves the extracted data to a CSV file.
 
 Usage:
 python coco_to_csv.py --input_json <path_to_coco_json> --output_csv <path_to_output_csv>
@@ -49,6 +49,7 @@ def coco_to_csv(input_file, output_file):
         image_id = annotation['image_id']
         bbox = annotation['bbox']
         category_id = annotation['category_id']
+        confidence_score = annotation.get('score', '')
 
         image_info = image_mapping.get(image_id)
         if image_info is None:
@@ -63,9 +64,21 @@ def coco_to_csv(input_file, output_file):
         match = re.search(r"_(\d{6})[_\.]", file_name)
         postal_code = match.group(1) if match else "Unknown"
 
-        csv_data.append([file_name, xmin, ymin, xmax, ymax, class_label, postal_code])
+        csv_data.append([file_name, xmin, ymin, xmax, ymax, class_label, confidence_score, postal_code])
 
-    df = pd.DataFrame(csv_data, columns=['file_path', 'xmin', 'ymin', 'xmax', 'ymax', 'class_label', 'postal_code'])
+    df = pd.DataFrame(
+        csv_data,
+        columns=[
+            'file_path',
+            'xmin',
+            'ymin',
+            'xmax',
+            'ymax',
+            'class_label',
+            'confidence_score',
+            'postal_code'
+        ]
+    )
     df.to_csv(output_file, index=False)
 
 def main():

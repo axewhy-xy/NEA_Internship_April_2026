@@ -16,7 +16,7 @@ Input CSV formats supported:
 2) id,postal_code,label
 
 Usage example:
-python Dataset/Extraction_Street.py --input-csv Dataset/hdb_points_postal.csv
+python Dataset/Extraction_Street.py --input-csv Dataset/hdb_points_postal.csv --api-key <YOUR_API_KEY>
 
 API key:
 Set GOOGLE_MAPS_API_KEY in your environment, or pass --api-key.
