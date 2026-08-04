@@ -47,3 +47,9 @@ logs
 *.tsv
 *.json
 *.xml
+
+#Temp files
+*.tmp
+*.temp
+*.pyc
+*.pyo
