@@ -49,6 +49,7 @@ logs
 *.xml
 
 #Temp files
+__pycache__
 *.tmp
 *.temp
 *.pyc
