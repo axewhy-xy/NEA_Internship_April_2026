@@ -45,9 +45,9 @@ NEA_Internship_April_2026
 |   ├── results                    ----------------- Actual results of the model predictions on the unlabelled images.
 |   ├── test_images                ------------------ Contains a fixed set of images for debugging and testing the model.
 |   └── test_results               ------------------ Result directory for the test images, containing the model's predictions and visualizations.
-├── readme.md                      ------------------ Contains the project overview, author's workflow and process, and other relevant information.
+├── readme.md(This file)
 ├── .gitignore
-└── usage.md (This file)
+└── workflow.md                    ------------------ Contains the project overview, author's workflow and process, and other relevant information.
 ```
 
 ## Dataset Extraction
