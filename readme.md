@@ -336,3 +336,25 @@ Since there are many command line arguments available for customizing the data a
 ```
 python Data_Augmentation/Dataset_Augmentation.py --help
 ```
+
+## File Validation
+The `Check_For_Similar_File.py` script is responsible for checking the augmented images for similarity and ensuring that there are no duplicate or near-duplicate images in the dataset. This is important to maintain the quality and diversity of the dataset, as duplicate images can lead to overfitting and reduced model performance.
+
+### Usage
+Basic usage: (For more details, refer to the source code comments or type `python Data_Augmentation/Check_For_Similar_File.py --help` for command-line options.)
+
+```
+python Data_Augmentation/Check_For_Similar_File.py --output-dir <OUTPUT_DIRECTORY> --metadata <METADATA_CSV> --image-dir <IMAGE_DIRECTORY>
+
+where:
+<OUTPUT_DIRECTORY>: Path to the directory where the results of the similarity check will be saved.
+<METADATA_CSV>: Path to the metadata CSV file containing information about the augmented images.
+<IMAGE_DIRECTORY>: Path to the directory containing the augmented images to be checked for similarity.
+```
+
+Command-line arguments:
+Since there are many command line arguments available for customizing the similarity check process, please refer to the script's help message for a complete list of options:
+
+```
+python Data_Augmentation/Check_For_Similar_File.py --help
+```
