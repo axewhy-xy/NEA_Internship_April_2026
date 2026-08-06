@@ -317,9 +317,10 @@ File Structure:
 
 The `Result` directory contains the output of the data augmentation process, including the augmented images and a metadata CSV file. The `augmented_metadata.csv` file contains information about the augmented images, such as the original image filename, the applied transformations, and other relevant details.
 
+### Dataset_Augmentation.py
 The main script for data augmentation is `Dataset_Augmentation.py`. This script applies various transformations to the images in the dataset, such as rotation, flipping, scaling, and color adjustments. The augmented images are saved in the `Result/images` directory, and the corresponding metadata is saved in the `augmented_metadata.csv` file.
 
-### Usage
+#### Usage
 Basic usage: (For more details, refer to the source code comments or type `python Data_Augmentation/Dataset_Augmentation.py --help` for command-line options.)
 
 ```
@@ -337,10 +338,10 @@ Since there are many command line arguments available for customizing the data a
 python Data_Augmentation/Dataset_Augmentation.py --help
 ```
 
-## File Validation
+### Check_For_Similar_File.py
 The `Check_For_Similar_File.py` script is responsible for checking the augmented images for similarity and ensuring that there are no duplicate or near-duplicate images in the dataset. This is important to maintain the quality and diversity of the dataset, as duplicate images can lead to overfitting and reduced model performance.
 
-### Usage
+#### Usage
 Basic usage: (For more details, refer to the source code comments or type `python Data_Augmentation/Check_For_Similar_File.py --help` for command-line options.)
 
 ```
