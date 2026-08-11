@@ -64,7 +64,7 @@ def run():
 
     summary = []
 
-    y_true = merged["Water Tank"].str.strip().eq("Yes")
+    y_true = merged["Water Tanks"].str.strip().eq("Yes")
     y_pred = merged["water_tank"].gt(0)
 
     metrics = binary_metrics(y_true, y_pred)
@@ -74,6 +74,7 @@ def run():
         **metrics,
         "coverage": 1.0,
     })
+    
     y_true = merged["Solar Panels"].str.strip().eq("Yes")
     y_pred = merged["solar_panels"].gt(0)
 
