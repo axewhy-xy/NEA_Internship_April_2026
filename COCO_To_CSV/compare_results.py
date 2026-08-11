@@ -40,6 +40,86 @@ def binary_metrics(y_true, y_pred):
         "f1": f1_score(y_true, y_pred, zero_division=0),
     }
 
+
+def report_column_differences(merged):
+    comparisons = [
+        {
+            "name": "Water Tanks",
+            "prediction_column": "water_tank",
+            "label_column": "Water Tanks",
+            "pred_value": merged["water_tank"].gt(0).map({True: "Yes", False: "No"}),
+            "true_value": merged["Water Tanks"].str.strip(),
+        },
+        {
+            "name": "Solar Panels",
+            "prediction_column": "solar_panels",
+            "label_column": "Solar Panels",
+            "pred_value": merged["solar_panels"].gt(0).map({True: "Yes", False: "No"}),
+            "true_value": merged["Solar Panels"].str.strip(),
+        },
+        {
+            "name": "Air-conditioning mount",
+            "prediction_column": "concrete_AC/frame_AC",
+            "label_column": "Dominant Type of Air-conditioning Mount",
+            "pred_value": np.select(
+                [
+                    merged["concrete_AC"] > merged["frame_AC"],
+                    merged["frame_AC"] > merged["concrete_AC"],
+                ],
+                ["Ledge", "Wall-mount"],
+                default="Unknown",
+            ),
+            "true_value": merged["Dominant Type of Air-conditioning Mount"].str.strip(),
+        },
+        {
+            "name": "Drying fixture",
+            "prediction_column": "drying_fixture",
+            "label_column": "Outdoor Laundry Rack Type",
+            "pred_value": merged["drying_fixture"].gt(0).map({True: "Observable", False: "Not Observable"}),
+            "true_value": np.where(
+                merged["Outdoor Laundry Rack Type"].str.strip().eq("Not Observable"),
+                "Not Observable",
+                "Observable",
+            ),
+        },
+    ]
+
+    print("=== COLUMN DIFFERENCES ===")
+    differences = []
+
+    for item in comparisons:
+        pred_value = pd.Series(item["pred_value"], index=merged.index)
+        true_value = pd.Series(item["true_value"], index=merged.index)
+
+        comparable_mask = pred_value.notna() & true_value.notna()
+        if item["name"] == "Air-conditioning mount":
+            comparable_mask = comparable_mask & (pred_value != "Unknown")
+
+        mismatch_mask = comparable_mask & (pred_value != true_value)
+        mismatch_count = int(mismatch_mask.sum())
+        comparable_count = int(comparable_mask.sum())
+
+        if mismatch_count > 0:
+            print(
+                f"{item['name']}: {mismatch_count} differing rows out of {comparable_count} comparable rows "
+                f"({item['prediction_column']} vs {item['label_column']})"
+            )
+            differences.append(
+                {
+                    "feature": item["name"],
+                    "prediction_column": item["prediction_column"],
+                    "label_column": item["label_column"],
+                    "differences": mismatch_count,
+                    "comparable_rows": comparable_count,
+                }
+            )
+
+    if not differences:
+        print("No column differences found among the compared feature columns.")
+
+    print()
+    return differences
+
 def run():
     pred = pd.read_csv(PREDICTION_FILE)
     labels = pd.read_csv(LABELS_FILE)
@@ -160,6 +240,8 @@ def run():
         merged["pred_drying_observable"]
         == merged["true_drying_observable"]
     )
+
+    report_column_differences(merged)
 
     pd.DataFrame(summary).to_csv(SUMMARY_OUTPUT, index=False)
     merged.to_csv(DETAIL_OUTPUT, index=False)
