@@ -113,6 +113,7 @@ The script accepts the following command-line arguments:
 --valid-ratio: Proportion of samples for validation set (default: 0.15)
 --map-type: Google Map Tiles map type (satellite, roadmap, terrain; default: satellite)
 --zoom-levels: Comma-separated zoom levels to download (default: 20)
+--no-split: If set, do not split the dataset into train/valid/test (default: False)
 ```
 
 The script will create a structured output directory containing the extracted images and a combined metadata CSV file. The metadata CSV will include information such as the location ID, postal code, coordinates, image URL, and other relevant details.
@@ -148,6 +149,7 @@ The script accepts the following command-line arguments:
 --min-delay-seconds: Minimum delay between requests to avoid rate limits.
 --geocode-delay-seconds: Delay between geocoding requests when postal codes are used.
 --metadata-only: If set, only query metadata without downloading images.
+--no-split: If set, do not split the dataset into train/valid/test (default: False).
 ```
 
 The script will create a structured output directory containing the extracted images and a combined metadata CSV file. The metadata CSV will include information such as the location ID, postal code, coordinates, image URL, and other relevant details.
