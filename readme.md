@@ -310,7 +310,7 @@ This section summarizes the best hyperparameter setting found during the trainin
 --lr-scheduler: cosine
 --batch-size: 4
 --monitor-metric: map
---early-stopping-patience: 5
+--early-stop-patience: 5
 ```
 
 The other hyperparameters can be left at their default values, as they did not significantly impact the model's performance in our experiments. However, it is always a good idea to perform hyperparameter tuning for your specific use case to achieve the best results.
