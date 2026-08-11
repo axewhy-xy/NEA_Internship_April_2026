@@ -3,7 +3,7 @@ Dataset extraction script for Google Maps Street View images.
 
 Author: AxeWhy
 Date: 2026-04-14
-Last updated: 2026-04-15
+Last updated: 2026-08-11
 
 Description:
 Builds a Street View image dataset from a CSV of locations and labels.
@@ -150,6 +150,11 @@ def parse_args():
 		action="store_true",
 		help="Only query metadata (availability), skip image downloads.",
 	)
+	parser.add_argument(
+		"--no-split",
+		action="store_true",
+		help="If set, do not split the dataset into train/valid/test.",
+	)
 	return parser.parse_args()
 
 '''
@@ -184,10 +189,11 @@ def validate_args(args):
 		raise ValueError(
 			"Missing API key. Set GOOGLE_MAPS_API_KEY or pass --api-key."
 		)
-	if args.train_ratio <= 0 or args.valid_ratio < 0:
-		raise ValueError("Split ratios must be non-negative and train > 0.")
-	if args.train_ratio + args.valid_ratio >= 1.0:
-		raise ValueError("train_ratio + valid_ratio must be < 1.0.")
+	if not args.no_split:
+		if args.train_ratio <= 0 or args.valid_ratio < 0:
+			raise ValueError("Split ratios must be non-negative and train > 0.")
+		if args.train_ratio + args.valid_ratio >= 1.0:
+			raise ValueError("train_ratio + valid_ratio must be < 1.0.")
 	if not re.fullmatch(r"\d+x\d+", args.size):
 		raise ValueError("--size must be in WIDTHxHEIGHT format, e.g. 640x640.")
 	if not (0 <= args.fov <= 120):
@@ -1011,12 +1017,17 @@ def run():
 			geocode_delay_seconds=args.geocode_delay_seconds,
 		)
 
-		train_rows, valid_rows, test_rows = split_rows(
-			samples,
-			seed=args.seed,
-			train_ratio=args.train_ratio,
-			valid_ratio=args.valid_ratio,
-		)
+		if not args.no_split:
+			train_rows, valid_rows, test_rows = split_rows(
+				samples,
+				seed=args.seed,
+				train_ratio=args.train_ratio,
+				valid_ratio=args.valid_ratio,
+			)
+		else:
+			train_rows = samples
+			valid_rows = []
+			test_rows = []
 
 		logging.info(
 			"Loaded %s samples | train=%s valid=%s test=%s",

@@ -3,7 +3,7 @@ Dataset extraction script for Google Maps Tile images.
 
 Author: AxeWhy
 Date: 2026-04-15
-Last updated: 2026-04-20
+Last updated: 2026-08-11
 
 Description:
 Builds a Google Maps Tile image dataset from a CSV of locations and labels.
@@ -171,6 +171,11 @@ def parse_args():
 		action="store_true",
 		help="Only compute tile coordinates and write metadata; skip downloads.",
 	)
+	parser.add_argument(
+		"--no-split",
+		action="store_true",
+		help="If set, do not split the dataset into train/valid/test.",
+	)
 	return parser.parse_args()
 
 '''
@@ -212,10 +217,11 @@ None (raises ValueError on invalid arguments)
 def validate_args(args):
 	if not args.api_key:
 		raise ValueError("Missing API key. Set GOOGLE_MAPS_API_KEY or pass --api-key.")
-	if args.train_ratio <= 0 or args.valid_ratio < 0:
-		raise ValueError("Split ratios must be non-negative and train > 0.")
-	if args.train_ratio + args.valid_ratio >= 1.0:
-		raise ValueError("train_ratio + valid_ratio must be < 1.0.")
+	if not args.no_split:
+		if args.train_ratio <= 0 or args.valid_ratio < 0:
+			raise ValueError("Split ratios must be non-negative and train > 0.")
+		if args.train_ratio + args.valid_ratio >= 1.0:
+			raise ValueError("train_ratio + valid_ratio must be < 1.0.")
 	if args.timeout_seconds <= 0:
 		raise ValueError("--timeout-seconds must be > 0.")
 	if args.max_retries < 0:
@@ -1211,12 +1217,17 @@ def run():
 			geocode_delay_seconds=args.geocode_delay_seconds,
 		)
 
-		train_rows, valid_rows, test_rows = split_rows(
-			samples,
-			seed=args.seed,
-			train_ratio=args.train_ratio,
-			valid_ratio=args.valid_ratio,
-		)
+		if not args.no_split:
+			train_rows, valid_rows, test_rows = split_rows(
+				samples,
+				seed=args.seed,
+				train_ratio=args.train_ratio,
+				valid_ratio=args.valid_ratio,
+			)
+		else:
+			train_rows = samples
+			valid_rows = []
+			test_rows = []
 
 		logging.info(
 			"Loaded %s samples | train=%s valid=%s test=%s | map_type=%s zoom_levels=%s",
