@@ -3,7 +3,7 @@ Simplify and sort a CSV file by removing unnecessary columns and sorting the row
 
 Author: AxeWhy
 Date Created: 2026-08-11
-Last Modified: 2026-08-11
+Last Modified: 2026-08-19
 
 Description:
 Converts an object detection CSV file into a simplified CSV file that keeps one row
@@ -47,9 +47,14 @@ def simplify(input_path: str, output_path: str) -> None:
         unmapped_labels = set()
  
         for row in reader:
-            postal_code = row["postal_code"]
-            class_label = row["class_label"]
+            postal_code = (row["postal_code"] or "").strip()
+            class_label = (row["class_label"] or "").strip()
             column = CLASS_TO_COLUMN.get(class_label)
+
+            if not postal_code:
+                continue
+
+            postal_code = postal_code.zfill(6)
 
             if postal_code not in summary_rows:
                 summary_rows[postal_code] = {col: 0 for col in OUTPUT_COLUMNS}
@@ -64,7 +69,8 @@ def simplify(input_path: str, output_path: str) -> None:
             writer = csv.DictWriter(outfile, fieldnames=OUTPUT_COLUMNS)
             writer.writeheader()
 
-            for out_row in summary_rows.values():
+            for postal_code in sorted(summary_rows):
+                out_row = summary_rows[postal_code]
                 writer.writerow(out_row)
 
     print(f"Wrote {len(summary_rows)} rows to {output_path}")
@@ -81,11 +87,13 @@ def parse_args():
     parser.add_argument(
         "--input",
         type=str,
+        required=True,
         help="Path to the input CSV file.",
     )
     parser.add_argument(
         "--output",
         type=str,
+        required=True,
         help="Path to the output CSV file.",
     )
     return parser.parse_args()
