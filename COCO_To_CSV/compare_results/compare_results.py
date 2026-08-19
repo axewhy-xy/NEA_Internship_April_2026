@@ -19,11 +19,11 @@ import pandas as pd
 import numpy as np
 import argparse
 
-PREDICTION_FILE = "predictions_simplified.csv"
-LABELS_FILE = "Labelled_BuildingFeature.csv"
+PREDICTION_FILE = "./COCO_To_CSV/compare_results/results/predictions_simplified_SUTD.csv"
+LABELS_FILE = "./COCO_To_CSV/compare_results/results/Labelled_BuildingFeature_SUTD.csv"
 
-DETAIL_OUTPUT = "comparison_details.csv"
-SUMMARY_OUTPUT = "comparison_summary.csv"
+DETAIL_OUTPUT = "./COCO_To_CSV/compare_results/results/comparison_details.csv"
+SUMMARY_OUTPUT = "./COCO_To_CSV/compare_results/results/comparison_summary.csv"
 
 def accuracy_score(y_true, y_pred):
     y_true = pd.Series(y_true).reset_index(drop=True)
